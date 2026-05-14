@@ -1,0 +1,21 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import { requireAdmin } from "../../core/router/guards";
+import { AdminPlaceholder } from "../../modules/admin";
+
+const auth = requireAdmin(Astro);
+if (auth instanceof Response) return auth;
+const session = auth;
+---
+
+<AppLayout
+  title="Admin Configuracion | Cetemet Control"
+  session={session}
+  breadcrumbs={["Admin", "Configuracion"]}
+>
+  <AdminPlaceholder
+    client:load
+    title="Configuracion global"
+    description="Placeholder para catalogos maestros, parametros ERP y politicas."
+  />
+</AppLayout>

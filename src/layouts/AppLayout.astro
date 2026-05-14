@@ -1,0 +1,374 @@
+---
+import "../styles/global.css";
+import { TopbarControls } from "../shared/ui/TopbarControls";
+import type { UserSession } from "../core/types";
+import { createDirectoryRepository } from "../modules/vacations/repositories/directory.repository";
+
+interface Props {
+  title?: string;
+  breadcrumbs?: string[];
+  session?: UserSession | null;
+  isPublic?: boolean;
+}
+
+const {
+  title = "Cetemet Control",
+  breadcrumbs = [],
+  session = null,
+  isPublic = false,
+} = Astro.props;
+const pathname = Astro.url.pathname;
+const ERP_TITLE = "cetemet-control-web";
+const directoryRepository = createDirectoryRepository();
+
+const formatMenuUserName = (userSession?: UserSession | null): string => {
+  if (!userSession) return "General";
+  const base =
+    userSession.displayName?.trim() || userSession.email.split("@")[0] || "";
+  const normalized = base.replace(/[._-]+/g, " ").replace(/\s+/g, " ").trim();
+  if (!normalized) return "General";
+  const words = normalized.split(" ");
+  const visibleWords =
+    words.length >= 2 ? words.slice(0, 2) : words.slice(0, 1);
+  return visibleWords
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .join(" ");
+};
+
+const isActivePath = (href: string): boolean => {
+  if (href === "/control-horario") return pathname === "/control-horario";
+  return pathname.startsWith(href);
+};
+
+const getSidebarLinkClass = (isActive: boolean): string =>
+  isActive
+    ? "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200 bg-slate-900 text-white shadow-md shadow-slate-200"
+    : "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-all duration-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900";
+
+const currentUser = session
+  ? await directoryRepository.findUserByEmail(session.email)
+  : null;
+const allDepartments = await directoryRepository.listDepartments();
+const currentDepartmentName =
+  allDepartments.find((department) => department.id === currentUser?.departmentId)
+    ?.name ?? "";
+const isCaffEngineeringWorker =
+  session?.role === "Empleado" &&
+  currentDepartmentName.trim().toLowerCase() === "cetemet engineering";
+const coordinatorDepartments = currentUser
+  ? await directoryRepository.listDepartmentsByCoordinator(currentUser.id)
+  : [];
+
+const canAccessTimeControlManagement =
+  session?.role === "Admin" || session?.role === "Responsable" || session?.canManageTimeControlRequests;
+
+const navItems = [
+  { label: "Dashboard", href: "/dashboard" },
+  { label: "Proyectos", href: "/proyectos" },
+  { label: "Vacaciones", href: "/vacaciones" },
+  { label: "Horas", href: "/horas" },
+  { label: "Mi control horario", href: "/control-horario" },
+  ...(canAccessTimeControlManagement
+    ? [{ label: "Gestion de control horario", href: "/control-horario/gestion" }]
+    : []),
+  ...(isCaffEngineeringWorker
+    ? [{ label: "Horas CAFF", href: "/horas-caff" }]
+    : []),
+  { label: "Reporting", href: "/reporting" },
+];
+
+const visibleNavItems =
+  session?.role === "Empleado"
+    ? navItems.filter((item) => item.href !== "/vacaciones-departamento")
+    : navItems;
+
+const timeControlItemHrefs = new Set(["/control-horario/gestion"]);
+
+const generalNavItems = visibleNavItems.filter(
+  (item) => !timeControlItemHrefs.has(item.href),
+);
+
+const timeControlSectionItems = visibleNavItems.filter((item) =>
+  timeControlItemHrefs.has(item.href) && 
+  coordinatorDepartments.length === 0 && 
+  session?.role !== "Admin",
+);
+
+const adminItems = [
+  { label: "Usuarios", href: "/admin/usuarios" },
+  { label: "Configuraci\u00f3n", href: "/admin/configuracion" },
+  { label: "Vacaciones", href: "/admin/vacaciones" },
+  { label: "Calendario", href: "/admin/calendario" },
+  ...(canAccessTimeControlManagement
+    ? [{ label: "Gestion de control horario", href: "/control-horario/gestion" }]
+    : []),
+];
+
+const coordinatorSections = coordinatorDepartments.map((department) => ({
+  title: department.name,
+  items: [
+    {
+      label: `Vacaciones de ${department.name}`,
+      href: `/vacaciones-departamento?departmentId=${department.id}`,
+    },
+    ...(canAccessTimeControlManagement
+      ? [
+          {
+            label: "Gestion de control horario",
+            href: "/control-horario/gestion",
+          },
+        ]
+      : []),
+  ],
+}));
+
+const showTimeControlSection = timeControlSectionItems.length > 0;
+const coordinatorNavSections = coordinatorSections;
+
+/* const timeControlSection = {
+  title: "Control Horario",
+  items: [
+    { label: "Mi control horario", href: "/control-horario" },
+    ...(canAccessTimeControlManagement
+      ? [
+          {
+            label: "Gestión de control horario",
+            href: "/control-horario/gestion",
+          },
+        ]
+      : []),
+  ],
+}; */
+---
+
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="generator" content={Astro.generator} />
+    <title>{title}</title>
+  </head>
+  <body class="min-h-screen bg-slate-100 text-slate-900 antialiased">
+    {isPublic && (
+      <main class="grid min-h-screen place-items-center px-4 py-8">
+        <div class="w-full max-w-md">
+          <slot />
+        </div>
+      </main>
+    )}
+
+    {!isPublic && (
+      <div class="min-h-screen flex flex-col md:flex-row">
+        <!-- Sidebar / Drawer -->
+        <aside 
+          id="sidebar"
+          class="fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200 transform -translate-x-full transition-transform duration-300 ease-in-out md:translate-x-0 md:static md:inset-auto"
+        >
+          <div class="flex flex-col h-full">
+            <div class="p-6 border-b border-slate-100 flex items-center justify-between">
+              <a href="/dashboard" class="flex items-center gap-2">
+                <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+                  <span class="text-white font-bold text-lg">C</span>
+                </div>
+                <span class="font-bold text-slate-900 tracking-tight">cetemet-control</span>
+              </a>
+              <button id="close-sidebar" class="md:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg">
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              </button>
+            </div>
+
+            <div class="flex-1 overflow-y-auto py-4 px-3 custom-scrollbar">
+              <nav class="space-y-1">
+                 <p class="px-3 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">General</p>
+                 {generalNavItems.map((item) => (
+                   <a
+                     href={item.href}
+                     class={getSidebarLinkClass(isActivePath(item.href))}
+                   >
+                     {item.label}
+                   </a>
+                 ))}
+              </nav>
+
+              {showTimeControlSection ? (
+                <nav class="mt-6 space-y-1">
+                  <p class="px-3 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Control Horario</p>
+                  {timeControlSectionItems.map((item) => (
+                    <a
+                      href={item.href}
+                      class={getSidebarLinkClass(isActivePath(item.href))}
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                </nav>
+              ) : null}
+
+              {coordinatorNavSections.map((section) => (
+                <nav class="mt-6 space-y-1">
+                  <p class="px-3 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">{section.title}</p>
+                  {section.items.map((item) => (
+                    <a
+                      href={item.href}
+                      class={getSidebarLinkClass(isActivePath(item.href))}
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                </nav>
+              ))}
+
+              {session?.role === "Admin" && (
+                <nav class="mt-6 space-y-1">
+                  <p class="px-3 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Administración</p>
+                  {adminItems.map((item) => (
+                    <a
+                      href={item.href}
+                      class={getSidebarLinkClass(isActivePath(item.href))}
+                    >
+                      {item.label}
+                    </a>
+                  ))}
+                </nav>
+              )}
+            </div>
+
+            <div class="p-4 border-t border-slate-100 bg-slate-50/50">
+               <div class="flex items-center gap-3 px-2">
+                 <div class="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold border-2 border-white shadow-sm">
+                   {formatMenuUserName(session).charAt(0)}
+                 </div>
+                 <div class="flex-1 min-w-0">
+                   <p class="text-sm font-bold text-slate-900 truncate">{formatMenuUserName(session)}</p>
+                   <p class="text-[10px] text-slate-500 font-medium uppercase tracking-wider">{session?.role || 'Usuario'}</p>
+                 </div>
+               </div>
+            </div>
+          </div>
+        </aside>
+
+        <!-- Backdrop for mobile -->
+        <div id="sidebar-backdrop" class="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm hidden md:hidden"></div>
+
+        <div class="flex-1 flex flex-col min-w-0">
+          <header class="sticky top-0 z-40 border-b border-slate-200 bg-white/80 backdrop-blur-md">
+            <div class="flex items-center justify-between gap-3 px-4 py-3 md:px-6">
+              <div class="flex min-w-0 items-center gap-2 md:gap-3">
+                <button 
+                  id="toggle-sidebar"
+                  class="p-2 text-slate-600 hover:bg-slate-50 rounded-lg md:hidden"
+                  aria-label="Abrir menú"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                </button>
+                
+                <div class="flex items-center md:hidden">
+                  <span class="font-bold text-slate-900 tracking-tight">cetemet</span>
+                </div>
+
+                <div class="hidden md:block min-w-0">
+                  <div class="text-sm text-slate-500 font-medium truncate">
+                    {breadcrumbs.length > 0 ? (
+                      <div class="flex items-center gap-2 min-w-0">
+                        <a href="/dashboard" class="hover:text-slate-900 transition-colors shrink-0">Inicio</a>
+                        {breadcrumbs.map((crumb) => (
+                          <span class="flex items-center gap-2 min-w-0">
+                            <svg class="w-4 h-4 text-slate-300 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 18 15 12 9 6"></polyline></svg>
+                            <span class="text-slate-900 truncate">{crumb}</span>
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span class="text-slate-900">Dashboard</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              
+              <div class="flex min-w-0 items-center gap-2 md:gap-4">
+                <div class="hidden sm:block">
+                  <TopbarControls
+                    client:load
+                    initialSession={session}
+                    showYear={true}
+                    showSession={false}
+                    showRole={false}
+                    showLogout={false}
+                  />
+                </div>
+                <TopbarControls
+                  client:load
+                  initialSession={session}
+                  showYear={false}
+                />
+              </div>
+            </div>
+          </header>
+          <main class="flex-1 p-4 md:p-8">
+            <slot />
+          </main>
+        </div>
+      </div>
+    )}
+    <script>
+      const sidebar = document.getElementById("sidebar");
+      const backdrop = document.getElementById("sidebar-backdrop");
+      const toggleBtn = document.getElementById("toggle-sidebar");
+      const closeBtn = document.getElementById("close-sidebar");
+
+      function toggleSidebar() {
+        if (!sidebar || !backdrop) return;
+        const isOpen = !sidebar.classList.contains("-translate-x-full");
+        
+        if (isOpen) {
+          sidebar.classList.add("-translate-x-full");
+          backdrop.classList.add("hidden");
+          document.body.classList.remove("overflow-hidden");
+        } else {
+          sidebar.classList.remove("-translate-x-full");
+          backdrop.classList.remove("hidden");
+          document.body.classList.add("overflow-hidden");
+        }
+      }
+
+      toggleBtn?.addEventListener("click", toggleSidebar);
+      closeBtn?.addEventListener("click", toggleSidebar);
+      backdrop?.addEventListener("click", toggleSidebar);
+
+      // Cerrar al redimensionar si pasamos a desktop
+      window.addEventListener("resize", () => {
+        if (window.innerWidth >= 768 && sidebar && !sidebar.classList.contains("-translate-x-full")) {
+          sidebar.classList.add("-translate-x-full");
+          backdrop?.classList.add("hidden");
+          document.body.classList.remove("overflow-hidden");
+        }
+      });
+    </script>
+    <style is:global>
+      .custom-scrollbar::-webkit-scrollbar {
+        width: 4px;
+        height: 4px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: transparent;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #e2e8f0;
+        border-radius: 10px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #cbd5e1;
+      }
+
+      /* Utility to hide scrollbar while keeping functionality */
+      .scrollbar-hide::-webkit-scrollbar {
+        display: none;
+      }
+      .scrollbar-hide {
+        -ms-overflow-style: none;
+        scrollbar-width: none;
+      }
+    </style>
+  </body>
+</html>

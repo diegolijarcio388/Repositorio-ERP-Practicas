@@ -1,0 +1,36 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import { requireAuth } from "../core/router/guards";
+import { CoordinatorVacationsWorkspace } from "../features/vacations/CoordinatorVacationsWorkspace";
+import { createDirectoryRepository } from "../modules/vacations/repositories/directory.repository";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const session = auth;
+const directoryRepository = createDirectoryRepository();
+const currentUser = await directoryRepository.findUserByEmail(session.email);
+const departments = currentUser ? await directoryRepository.listDepartmentsByCoordinator(currentUser.id) : [];
+const canAccessDepartmentWorkspace = Boolean(
+  currentUser && (currentUser.role === "admin" || currentUser.role === "coordinator" || departments.length > 0),
+);
+if (!canAccessDepartmentWorkspace) return Astro.redirect("/vacaciones");
+const requestedDepartmentId = Astro.url.searchParams.get("departmentId");
+const selectedDepartment =
+  (requestedDepartmentId
+    ? departments.find((department) => department.id === requestedDepartmentId)
+    : null) ?? departments[0];
+---
+
+<AppLayout
+  title="Vacaciones de Departamento | Cetemet Control"
+  session={session}
+  breadcrumbs={["General", selectedDepartment?.name ?? "Vacaciones Departamento"]}
+>
+  <CoordinatorVacationsWorkspace
+    client:load
+    session={session}
+    departmentId={selectedDepartment?.id}
+    departmentName={selectedDepartment?.name}
+    responsibleName={currentUser?.name}
+  />
+</AppLayout>

@@ -1,0 +1,2 @@
+ALTER TABLE users
+  ADD COLUMN job_title VARCHAR(128) NULL AFTER name;

@@ -1,0 +1,3 @@
+ALTER TABLE workday_incident_justifications
+ADD COLUMN hidden_by_worker_at DATETIME NULL
+AFTER reviewed_by_admin_id;

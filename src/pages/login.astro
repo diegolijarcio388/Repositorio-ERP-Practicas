@@ -1,0 +1,22 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import { getOptionalSession } from "../core/router/guards";
+import { LoginForm } from "../modules/auth";
+
+const session = getOptionalSession(Astro);
+if (session) return Astro.redirect("/dashboard");
+---
+
+<AppLayout
+  title="Login | Cetemet Control"
+  isPublic={true}
+  breadcrumbs={["Login"]}
+>
+  <section
+    class="mx-auto w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+  >
+    <h1 class="mb-3 text-2xl font-semibold">Iniciar sesion</h1>
+    <p class="mb-5 text-sm text-slate-600">Acceso al ERP modular de Cetemet.</p>
+    <LoginForm client:load />
+  </section>
+</AppLayout>

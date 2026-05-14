@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS workday_adjustment_requests (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(64) NOT NULL,
+  request_date DATE NOT NULL,
+  request_type ENUM('CHECK_IN', 'CHECK_OUT') NOT NULL,
+  requested_time DATETIME(3) NOT NULL,
+  requested_latitude DECIMAL(10,7) NULL,
+  requested_longitude DECIMAL(10,7) NULL,
+  reason TEXT NOT NULL,
+  status ENUM('PENDING', 'APPROVED', 'REJECTED') NOT NULL DEFAULT 'PENDING',
+  reviewed_by VARCHAR(64) NULL,
+  review_comment TEXT NULL,
+  created_at DATETIME(3) NOT NULL,
+  updated_at DATETIME(3) NOT NULL,
+  INDEX idx_adjustment_user_date (user_id, request_date),
+  INDEX idx_adjustment_status (status),
+  INDEX idx_adjustment_reviewed_by (reviewed_by),
+  CONSTRAINT fk_adjustment_user FOREIGN KEY (user_id) REFERENCES users(id),
+  CONSTRAINT fk_adjustment_reviewed_by FOREIGN KEY (reviewed_by) REFERENCES users(id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

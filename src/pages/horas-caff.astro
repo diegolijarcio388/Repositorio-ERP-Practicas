@@ -1,0 +1,29 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import { requireAuth } from "../core/router/guards";
+import { createDirectoryRepository } from "../modules/vacations/repositories/directory.repository";
+import { WorkerCaffHoursWorkspace } from "../features/caff-hours/WorkerCaffHoursWorkspace";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const session = auth;
+
+if (session.role !== "Empleado") return Astro.redirect("/dashboard");
+
+const directoryRepository = createDirectoryRepository();
+const currentUser = await directoryRepository.findUserByEmail(session.email);
+const departments = await directoryRepository.listDepartments();
+const departmentName =
+  departments.find((department) => department.id === currentUser?.departmentId)?.name ?? "";
+const hasCaffAccess = departmentName.trim().toLowerCase() === "cetemet engineering";
+
+if (!hasCaffAccess) return Astro.redirect("/dashboard");
+---
+
+<AppLayout
+  title="Horas CAFF | Cetemet Control"
+  session={session}
+  breadcrumbs={["General", "Horas CAFF"]}
+>
+  <WorkerCaffHoursWorkspace client:load session={session} />
+</AppLayout>

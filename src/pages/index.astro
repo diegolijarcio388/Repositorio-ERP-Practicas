@@ -1,0 +1,9 @@
+---
+import { getOptionalSession } from "../core/router/guards";
+
+const session = getOptionalSession(Astro);
+if (session) {
+  return Astro.redirect("/dashboard");
+}
+return Astro.redirect("/login");
+---

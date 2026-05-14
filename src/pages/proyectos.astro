@@ -1,0 +1,25 @@
+---
+import AppLayout from "../layouts/AppLayout.astro";
+import { requireAuth } from "../core/router/guards";
+import { AdminProjectsWorkspace } from "../features/projects/AdminProjectsWorkspace";
+import { CoordinatorProjectsWorkspace } from "../features/projects/CoordinatorProjectsWorkspace";
+import { WorkerProjectsWorkspace } from "../features/projects/WorkerProjectsWorkspace";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const session = auth;
+---
+
+<AppLayout
+  title="Proyectos | Cetemet Control"
+  session={session}
+  breadcrumbs={["General", "Proyectos"]}
+>
+  {session.role === "Admin" ? (
+    <AdminProjectsWorkspace client:load session={session} />
+  ) : session.role === "Responsable" ? (
+    <CoordinatorProjectsWorkspace client:load session={session} />
+  ) : (
+    <WorkerProjectsWorkspace client:load session={session} />
+  )}
+</AppLayout>

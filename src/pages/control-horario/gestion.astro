@@ -1,0 +1,25 @@
+---
+import AppLayout from "../../layouts/AppLayout.astro";
+import { requireAuth } from "../../core/router/guards";
+import { AdminTimeControlWorkspace } from "../../features/time-control/AdminTimeControlWorkspace";
+
+const auth = requireAuth(Astro);
+if (auth instanceof Response) return auth;
+const session = auth;
+
+if (
+  session.role !== "Admin" &&
+  session.role !== "Responsable" &&
+  !session.canManageTimeControlRequests
+) {
+  return Astro.redirect("/control-horario");
+}
+---
+
+<AppLayout
+  title="Gestión de Control Horario | Cetemet Control"
+  session={session}
+  breadcrumbs={["General", "Control Horario", "Gestión"]}
+>
+  <AdminTimeControlWorkspace client:load session={session} />
+</AppLayout>
