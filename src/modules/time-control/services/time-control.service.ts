@@ -15,6 +15,7 @@ import {
   createWorkdayRecordsRepository,
   type WorkdayRecordsRepository,
 } from "../repositories/workday-records.repository";
+import { createTimeControlAllowedLocationsService } from "./time-control-allowed-locations.service";
 import { createTimeControlTrustedNetworksService } from "./time-control-trusted-networks.service";
 
 const MIN_EXPECTED_WORKDAY_MINUTES = 7 * 60 + 45;
@@ -23,15 +24,6 @@ const STANDARD_WORKDAY_MINUTES = 480;
 const BUSINESS_TIME_ZONE = "Europe/Madrid";
 const SCHEDULE_START_MINUTES = 6 * 60;
 const SCHEDULE_END_MINUTES = 7 * 60 + 30;
-const ALLOWED_CHECK_IN_POINTS = [
-  {
-    name: "Sede principal",
-    latitude: 38.0,
-    longitude: -3.0,
-    radiusMeters: 100,
-  },
-] as const;
-
 const pad = (value: number, length = 2): string =>
   String(value).padStart(length, "0");
 
@@ -165,8 +157,13 @@ export interface FichajeLocationInput {
 
 const buildLocationIncidentFlags = (
   location: FichajeLocationInput,
+  allowedLocations: ReadonlyArray<{
+    latitude: number;
+    longitude: number;
+    radiusMeters: number;
+  }>,
 ): IncidentFlag[] | null => {
-  const isInsideAllowedPoint = ALLOWED_CHECK_IN_POINTS.some((point) => {
+  const isInsideAllowedPoint = allowedLocations.some((point) => {
     const distanceMeters = calculateDistanceMeters(
       location.latitude,
       location.longitude,
@@ -192,6 +189,25 @@ const mergeIncidentFlags = (
   }
 
   return merged.size > 0 ? Array.from(merged) : null;
+};
+
+const hasLocationOutsideAllowedPoint = (
+  flags: IncidentFlag[] | null,
+): boolean => Boolean(flags?.includes("OUT_OF_ALLOWED_LOCATION"));
+
+const normalizeLocationIncidentFlags = (
+  deviceType: WorkdayDeviceType,
+  flags: IncidentFlag[] | null,
+): IncidentFlag[] | null => {
+  if (deviceType !== "MOBILE" || !hasLocationOutsideAllowedPoint(flags)) {
+    return flags;
+  }
+
+  const filteredFlags = flags?.filter(
+    (flag) => flag !== "OUT_OF_ALLOWED_LOCATION",
+  );
+
+  return filteredFlags && filteredFlags.length > 0 ? filteredFlags : null;
 };
 
 const hasGlobalTimeControlManagement = (
@@ -269,10 +285,7 @@ const hasSuspiciousDevice = (record: WorkdayRecord): boolean =>
   record.checkOutDeviceType === "DESKTOP" ||
   record.checkOutDeviceType === "UNKNOWN";
 
-const calculateTrustLevel = (
-  record: WorkdayRecord,
-  isTrustedNetwork: boolean,
-): WorkdayTrustLevel => {
+const calculateTrustLevel = (record: WorkdayRecord): WorkdayTrustLevel => {
   if (
     !Number.isFinite(record.checkInLatitude) ||
     !Number.isFinite(record.checkInLongitude)
@@ -288,11 +301,11 @@ const calculateTrustLevel = (
     return "BAJA";
   }
 
-  if (isTrustedNetwork && record.checkInDeviceType !== "UNKNOWN") {
-    return "ALTA";
+  if (record.adminValidationReason === "OUTSIDE_ALLOWED_LOCATION") {
+    return "MEDIA";
   }
 
-  return "MEDIA";
+  return "ALTA";
 };
 
 const resolveAdminValidationReason = (
@@ -300,10 +313,14 @@ const resolveAdminValidationReason = (
     WorkdayRecord,
     "checkInDeviceType" | "checkOutDeviceType" | "incidentFlags"
   >,
-  isTrustedNetwork: boolean,
+  hasOutsideAllowedLocationOnMobile = false,
 ): TimeControlAdminValidationReason | null => {
   if (record.incidentFlags?.includes("DEVICE_NOT_ALLOWED")) {
     return "DEVICE_NOT_ALLOWED";
+  }
+
+  if (hasOutsideAllowedLocationOnMobile) {
+    return "OUTSIDE_ALLOWED_LOCATION";
   }
 
   if (
@@ -318,10 +335,6 @@ const resolveAdminValidationReason = (
     record.checkOutDeviceType === "DESKTOP"
   ) {
     return "DESKTOP_DEVICE";
-  }
-
-  if (!isTrustedNetwork) {
-    return "EXTERNAL_NETWORK";
   }
 
   return null;
@@ -373,17 +386,26 @@ export class TimeControlService implements WorkdayRecordsService {
   constructor(
     private readonly repository: WorkdayRecordsRepository = createWorkdayRecordsRepository(),
     private readonly directoryRepository = createDirectoryRepository(),
+    private readonly allowedLocationsService = createTimeControlAllowedLocationsService(),
     private readonly trustedNetworksService = createTimeControlTrustedNetworksService(),
   ) {}
 
+  private async getAllowedLocations() {
+    return this.allowedLocationsService.listActive();
+  }
+
+  private async getTrustedNetworkCheckerSafe() {
+    try {
+      return await this.trustedNetworksService.getTrustedNetworkChecker();
+    } catch {
+      return () => false;
+    }
+  }
+
   private async decorateRecord(record: WorkdayRecord): Promise<WorkdayRecord> {
-    const trustedNetworkChecker =
-      await this.trustedNetworksService.getTrustedNetworkChecker();
+    const trustedNetworkChecker = await this.getTrustedNetworkCheckerSafe();
     const isTrustedNetwork = trustedNetworkChecker(record.checkInIpAddress);
-    const adminValidationReason = resolveAdminValidationReason(
-      record,
-      isTrustedNetwork,
-    );
+    const adminValidationReason = resolveAdminValidationReason(record);
 
     return {
       ...record,
@@ -397,7 +419,7 @@ export class TimeControlService implements WorkdayRecordsService {
           record.requiresAdminValidation || adminValidationReason !== null,
         adminValidationStatus: record.adminValidationStatus,
       }),
-      trustLevel: calculateTrustLevel(record, isTrustedNetwork),
+      trustLevel: calculateTrustLevel(record),
     };
   }
 
@@ -406,15 +428,11 @@ export class TimeControlService implements WorkdayRecordsService {
       return records;
     }
 
-    const trustedNetworkChecker =
-      await this.trustedNetworksService.getTrustedNetworkChecker();
+    const trustedNetworkChecker = await this.getTrustedNetworkCheckerSafe();
 
     return records.map((record) => {
       const isTrustedNetwork = trustedNetworkChecker(record.checkInIpAddress);
-      const adminValidationReason = resolveAdminValidationReason(
-        record,
-        isTrustedNetwork,
-      );
+      const adminValidationReason = resolveAdminValidationReason(record);
       return {
         ...record,
         isTrustedNetwork,
@@ -427,7 +445,7 @@ export class TimeControlService implements WorkdayRecordsService {
             record.requiresAdminValidation || adminValidationReason !== null,
           adminValidationStatus: record.adminValidationStatus,
         }),
-        trustLevel: calculateTrustLevel(record, isTrustedNetwork),
+        trustLevel: calculateTrustLevel(record),
       };
     });
   }
@@ -447,9 +465,20 @@ export class TimeControlService implements WorkdayRecordsService {
       location.deviceReason,
     );
     const normalizedUserAgent = normalizeUserAgent(location.userAgent);
+    const allowedLocations = await this.getAllowedLocations();
+    const rawLocationIncidentFlags = buildLocationIncidentFlags(
+      location,
+      allowedLocations,
+    );
+    const hasOutsideAllowedLocationOnMobile =
+      normalizedDeviceType === "MOBILE" &&
+      hasLocationOutsideAllowedPoint(rawLocationIncidentFlags);
     const incidentFlags = mergeIncidentFlags(
       buildCheckInIncidentFlags(now),
-      buildLocationIncidentFlags(location),
+      normalizeLocationIncidentFlags(
+        normalizedDeviceType,
+        rawLocationIncidentFlags,
+      ),
       buildDeviceIncidentFlags(user, normalizedDeviceType),
     );
 
@@ -458,16 +487,13 @@ export class TimeControlService implements WorkdayRecordsService {
       throw new Error("Ya existe una jornada abierta para este usuario.");
     }
 
-    const trustedNetworkChecker =
-      await this.trustedNetworksService.getTrustedNetworkChecker();
-    const isTrustedNetwork = trustedNetworkChecker(location.ipAddress);
     const adminValidationReason = resolveAdminValidationReason(
       {
         checkInDeviceType: normalizedDeviceType,
         checkOutDeviceType: null,
         incidentFlags,
       },
-      isTrustedNetwork,
+      hasOutsideAllowedLocationOnMobile,
     );
 
     const input: CreateCheckInInput = {
@@ -527,24 +553,31 @@ export class TimeControlService implements WorkdayRecordsService {
       throw new Error("La hora de salida debe ser posterior a la hora de entrada.");
     }
 
+    const allowedLocations = await this.getAllowedLocations();
+    const rawLocationIncidentFlags = buildLocationIncidentFlags(
+      location,
+      allowedLocations,
+    );
+    const hasOutsideAllowedLocationOnMobile =
+      normalizedDeviceType === "MOBILE" &&
+      hasLocationOutsideAllowedPoint(rawLocationIncidentFlags);
     const incidentFlags = mergeIncidentFlags(
       openRecord.incidentFlags,
       buildIncidentFlags(workedMinutes),
-      buildLocationIncidentFlags(location),
+      normalizeLocationIncidentFlags(
+        normalizedDeviceType,
+        rawLocationIncidentFlags,
+      ),
       buildDeviceIncidentFlags(user, normalizedDeviceType),
     );
-    const trustedNetworkChecker =
-      await this.trustedNetworksService.getTrustedNetworkChecker();
-    const isTrustedNetwork =
-      trustedNetworkChecker(openRecord.checkInIpAddress) ||
-      trustedNetworkChecker(location.ipAddress);
     const adminValidationReason = resolveAdminValidationReason(
       {
         checkInDeviceType: openRecord.checkInDeviceType,
         checkOutDeviceType: normalizedDeviceType,
         incidentFlags,
       },
-      isTrustedNetwork,
+      openRecord.adminValidationReason === "OUTSIDE_ALLOWED_LOCATION" ||
+        hasOutsideAllowedLocationOnMobile,
     );
     const overtimeMinutes = calculateOvertimeMinutes(workedMinutes);
     const input: CloseCheckOutInput = {

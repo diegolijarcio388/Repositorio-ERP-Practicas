@@ -35,72 +35,155 @@ const mapUserRow = (row: DbUserRow): UserDirectoryRecord => ({
 const USER_SELECT =
   "SELECT id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, can_manage_vacations, can_manage_projects FROM users";
 
+const isRecoverableDirectoryReadError = (error: unknown): boolean => {
+  const errorRecord =
+    error && typeof error === "object" ? (error as Record<string, unknown>) : null;
+  const message =
+    error instanceof Error ? error.message.toLowerCase() : String(error ?? "").toLowerCase();
+  const sqlMessage = String(errorRecord?.sqlMessage ?? "").toLowerCase();
+  const sqlState = String(errorRecord?.sqlState ?? "").toLowerCase();
+  const errno = Number(errorRecord?.errno ?? 0);
+
+  return (
+    message.includes("doesn't exist in engine") ||
+    sqlMessage.includes("doesn't exist in engine") ||
+    message.includes("marked as crashed") ||
+    sqlMessage.includes("marked as crashed") ||
+    message.includes("incorrect information in file") ||
+    sqlMessage.includes("incorrect information in file") ||
+    message.includes("got error 168") ||
+    sqlMessage.includes("got error 168") ||
+    errno === 1932 ||
+    sqlState === "42s02"
+  );
+};
+
+const logDirectoryReadError = (context: string, error: unknown) => {
+  console.error(`DirectoryRepository.${context} failed:`, error);
+};
+
 export class DirectoryRepository {
   async findUserById(userId: string): Promise<UserDirectoryRecord | null> {
-    const [rows] = await getMySqlPool().query<DbUserRow[]>(
-      `${USER_SELECT} WHERE id = ? LIMIT 1`,
-      [userId],
-    );
-    const row = rows[0];
-    return row ? mapUserRow(row) : null;
+    try {
+      const [rows] = await getMySqlPool().query<DbUserRow[]>(
+        `${USER_SELECT} WHERE id = ? LIMIT 1`,
+        [userId],
+      );
+      const row = rows[0];
+      return row ? mapUserRow(row) : null;
+    } catch (error) {
+      if (isRecoverableDirectoryReadError(error)) {
+        logDirectoryReadError("findUserById", error);
+        return null;
+      }
+      throw error;
+    }
   }
 
   async findUserByEmail(email: string): Promise<UserDirectoryRecord | null> {
-    const [rows] = await getMySqlPool().query<DbUserRow[]>(
-      `${USER_SELECT} WHERE LOWER(email) = LOWER(?) LIMIT 1`,
-      [email],
-    );
-    const row = rows[0];
-    return row ? mapUserRow(row) : null;
+    try {
+      const [rows] = await getMySqlPool().query<DbUserRow[]>(
+        `${USER_SELECT} WHERE LOWER(email) = LOWER(?) LIMIT 1`,
+        [email],
+      );
+      const row = rows[0];
+      return row ? mapUserRow(row) : null;
+    } catch (error) {
+      if (isRecoverableDirectoryReadError(error)) {
+        logDirectoryReadError("findUserByEmail", error);
+        return null;
+      }
+      throw error;
+    }
   }
 
   async listAdmins(): Promise<UserDirectoryRecord[]> {
-    const [rows] = await getMySqlPool().query<DbUserRow[]>(
-      `${USER_SELECT} WHERE role = 'admin' ORDER BY name ASC`,
-    );
-    return rows.map(mapUserRow);
+    try {
+      const [rows] = await getMySqlPool().query<DbUserRow[]>(
+        `${USER_SELECT} WHERE role = 'admin' ORDER BY name ASC`,
+      );
+      return rows.map(mapUserRow);
+    } catch (error) {
+      if (isRecoverableDirectoryReadError(error)) {
+        logDirectoryReadError("listAdmins", error);
+        return [];
+      }
+      throw error;
+    }
   }
 
   async listByDepartment(departmentId: string): Promise<UserDirectoryRecord[]> {
-    const [rows] = await getMySqlPool().query<DbUserRow[]>(
-      `${USER_SELECT} WHERE department_id = ? ORDER BY name ASC`,
-      [departmentId],
-    );
-    return rows.map(mapUserRow);
+    try {
+      const [rows] = await getMySqlPool().query<DbUserRow[]>(
+        `${USER_SELECT} WHERE department_id = ? ORDER BY name ASC`,
+        [departmentId],
+      );
+      return rows.map(mapUserRow);
+    } catch (error) {
+      if (isRecoverableDirectoryReadError(error)) {
+        logDirectoryReadError("listByDepartment", error);
+        return [];
+      }
+      throw error;
+    }
   }
 
   async listAllUsers(): Promise<UserDirectoryRecord[]> {
-    const [rows] = await getMySqlPool().query<DbUserRow[]>(
-      `${USER_SELECT} ORDER BY name ASC`,
-    );
-    return rows.map(mapUserRow);
+    try {
+      const [rows] = await getMySqlPool().query<DbUserRow[]>(
+        `${USER_SELECT} ORDER BY name ASC`,
+      );
+      return rows.map(mapUserRow);
+    } catch (error) {
+      if (isRecoverableDirectoryReadError(error)) {
+        logDirectoryReadError("listAllUsers", error);
+        return [];
+      }
+      throw error;
+    }
   }
 
   async listDepartments(): Promise<DepartmentRecord[]> {
-    const [rows] = await getMySqlPool().query<
-      Array<{ id: string; name: string; coordinator_user_id: string }>
-    >("SELECT id, name, coordinator_user_id FROM departments ORDER BY name ASC");
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      coordinatorUserId: row.coordinator_user_id,
-    }));
+    try {
+      const [rows] = await getMySqlPool().query<
+        Array<{ id: string; name: string; coordinator_user_id: string }>
+      >("SELECT id, name, coordinator_user_id FROM departments ORDER BY name ASC");
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        coordinatorUserId: row.coordinator_user_id,
+      }));
+    } catch (error) {
+      if (isRecoverableDirectoryReadError(error)) {
+        logDirectoryReadError("listDepartments", error);
+        return [];
+      }
+      throw error;
+    }
   }
 
   async listDepartmentsByCoordinator(
     userId: string,
   ): Promise<DepartmentRecord[]> {
-    const [rows] = await getMySqlPool().query<
-      Array<{ id: string; name: string; coordinator_user_id: string }>
-    >(
-      "SELECT id, name, coordinator_user_id FROM departments WHERE coordinator_user_id = ? ORDER BY name ASC",
-      [userId],
-    );
-    return rows.map((row) => ({
-      id: row.id,
-      name: row.name,
-      coordinatorUserId: row.coordinator_user_id,
-    }));
+    try {
+      const [rows] = await getMySqlPool().query<
+        Array<{ id: string; name: string; coordinator_user_id: string }>
+      >(
+        "SELECT id, name, coordinator_user_id FROM departments WHERE coordinator_user_id = ? ORDER BY name ASC",
+        [userId],
+      );
+      return rows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        coordinatorUserId: row.coordinator_user_id,
+      }));
+    } catch (error) {
+      if (isRecoverableDirectoryReadError(error)) {
+        logDirectoryReadError("listDepartmentsByCoordinator", error);
+        return [];
+      }
+      throw error;
+    }
   }
 
   async createUser(input: {

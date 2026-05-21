@@ -27,6 +27,7 @@ export type WorkdayTrustLevel = "ALTA" | "MEDIA" | "BAJA" | "INVÁLIDA";
 
 export type TimeControlAdminValidationReason =
   | "EXTERNAL_NETWORK"
+  | "OUTSIDE_ALLOWED_LOCATION"
   | "DEVICE_NOT_ALLOWED"
   | "DESKTOP_DEVICE"
   | "UNKNOWN_DEVICE";
@@ -252,6 +253,41 @@ export interface ReviewWorkdayIncidentJustificationInput {
 }
 
 export type TrustedNetworkType = "EXACT_IP" | "CIDR";
+
+export interface TimeControlAllowedLocation {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  isActive: boolean;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateTimeControlAllowedLocationInput {
+  id: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+  radiusMeters: number;
+  isActive: boolean;
+  description: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface UpdateTimeControlAllowedLocationInput {
+  id: string;
+  name?: string;
+  latitude?: number;
+  longitude?: number;
+  radiusMeters?: number;
+  isActive?: boolean;
+  description?: string | null;
+  updatedAt: string;
+}
 
 export interface TimeControlTrustedNetwork {
   id: string;

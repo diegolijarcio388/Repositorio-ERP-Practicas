@@ -30,7 +30,6 @@ const JUSTIFIABLE_INCIDENT_FLAGS: JustifiableIncidentFlag[] = [
   "DURATION_TOO_SHORT",
   "DURATION_TOO_LONG",
   "OUT_OF_SCHEDULE",
-  "OUT_OF_ALLOWED_LOCATION",
 ];
 
 const nowSqlDateTime = (): string =>

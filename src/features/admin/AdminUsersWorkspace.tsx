@@ -26,9 +26,9 @@ const ROLE_LABELS: Record<string, string> = {
 };
 
 const ROLE_COLORS: Record<string, string> = {
-  worker: "bg-slate-100 text-slate-700",
-  coordinator: "bg-blue-100 text-blue-700",
-  admin: "bg-purple-100 text-purple-700",
+  worker: "bg-slate-50 text-slate-600 ring-1 ring-inset ring-slate-500/10",
+  coordinator: "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-600/20",
+  admin: "bg-purple-50 text-purple-700 ring-1 ring-inset ring-purple-600/20",
 };
 
 const defaultUserForm = () => ({
@@ -293,26 +293,63 @@ export function AdminUsersWorkspace() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div>
-          <h2 className="text-lg font-semibold">Administración de usuarios</h2>
-          <p className="mt-0.5 text-sm text-slate-500">{users.length} trabajadores · {departments.length} departamentos</p>
+      {/* Header Premium */}
+      <div className="relative overflow-hidden rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-900 to-slate-800 p-6 shadow-lg shadow-slate-900/10">
+        <div className="absolute top-0 right-0 -mt-10 -mr-10 h-40 w-40 rounded-full bg-slate-700/30 blur-3xl" />
+        <div className="relative flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <svg className="w-5 h-5 text-sky-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z" />
+              </svg>
+              <h2 className="text-xl font-bold text-white tracking-tight">Directorio Corporativo</h2>
+            </div>
+            <p className="mt-1 text-sm font-medium text-slate-400">
+              <span className="text-sky-300 font-semibold">{users.length}</span> trabajadores activos · <span className="text-sky-300 font-semibold">{departments.length}</span> departamentos
+            </p>
+          </div>
+          <button
+            onClick={activeTab === "users" ? openCreateUser : openCreateDept}
+            className="inline-flex items-center justify-center rounded-xl bg-sky-500 px-4 py-2 text-sm font-bold text-white shadow-md shadow-sky-500/20 transition-all hover:bg-sky-400 hover:shadow-sky-500/30 active:scale-95 border border-sky-400/50"
+          >
+            {activeTab === "users" ? (
+              <>
+                <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/></svg>
+                Nuevo trabajador
+              </>
+            ) : (
+              <>
+                <svg className="mr-2 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/></svg>
+                Nuevo departamento
+              </>
+            )}
+          </button>
         </div>
-        <Button onClick={activeTab === "users" ? openCreateUser : openCreateDept}>
-          {activeTab === "users" ? "+ Nuevo trabajador" : "+ Nuevo departamento"}
-        </Button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+      {/* Tabs Estilizadas */}
+      <div className="inline-flex gap-1 rounded-xl bg-slate-100/80 p-1.5 shadow-inner backdrop-blur-sm">
         {(["users", "departments"] as const).map((tab) => (
           <button
             key={tab}
             onClick={() => setActiveTab(tab)}
-            className={`flex-1 rounded-md px-4 py-2 text-sm font-medium transition-colors ${activeTab === tab ? "bg-slate-900 text-white" : "text-slate-600 hover:bg-slate-50"}`}
+            className={`flex items-center gap-2 rounded-lg px-5 py-2 text-sm font-semibold transition-all duration-200 ${
+              activeTab === tab 
+                ? "bg-white text-slate-900 shadow-sm ring-1 ring-slate-200/50" 
+                : "text-slate-500 hover:text-slate-700 hover:bg-slate-200/50"
+            }`}
           >
-            {tab === "users" ? `Trabajadores (${users.length})` : `Departamentos (${departments.length})`}
+            {tab === "users" ? (
+              <>
+                <svg className="w-4 h-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z" /></svg>
+                Trabajadores <span className={`ml-1.5 rounded-full px-2 py-0.5 text-[10px] ${activeTab === tab ? 'bg-slate-100 text-slate-600' : 'bg-white/50'}`}>{users.length}</span>
+              </>
+            ) : (
+              <>
+                <svg className="w-4 h-4 opacity-70" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" /></svg>
+                Departamentos <span className={`ml-1.5 rounded-full px-2 py-0.5 text-[10px] ${activeTab === tab ? 'bg-slate-100 text-slate-600' : 'bg-white/50'}`}>{departments.length}</span>
+              </>
+            )}
           </button>
         ))}
       </div>
@@ -371,24 +408,24 @@ export function AdminUsersWorkspace() {
                       </span>
                     </td>
                     <td className="px-4 py-3 text-sm">
-                      <div className="flex flex-wrap gap-1">
+                      <div className="flex flex-wrap gap-1.5">
                         {u.canManageTimeControlRequests && (
-                          <span className="rounded bg-emerald-100 px-2 py-0.5 text-[10px] font-medium text-emerald-800">
+                          <span className="inline-flex items-center rounded bg-emerald-50 px-2 py-0.5 text-[10px] font-bold tracking-wide text-emerald-700 ring-1 ring-inset ring-emerald-600/20 shadow-sm">
                             Fichajes
                           </span>
                         )}
                         {u.canManageVacations && (
-                          <span className="rounded bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800">
+                          <span className="inline-flex items-center rounded bg-sky-50 px-2 py-0.5 text-[10px] font-bold tracking-wide text-sky-700 ring-1 ring-inset ring-sky-600/20 shadow-sm">
                             Vacaciones
                           </span>
                         )}
                         {u.canManageProjects && (
-                          <span className="rounded bg-purple-100 px-2 py-0.5 text-[10px] font-medium text-purple-800">
+                          <span className="inline-flex items-center rounded bg-indigo-50 px-2 py-0.5 text-[10px] font-bold tracking-wide text-indigo-700 ring-1 ring-inset ring-indigo-600/20 shadow-sm">
                             Proyectos
                           </span>
                         )}
                         {!u.canManageTimeControlRequests && !u.canManageVacations && !u.canManageProjects && (
-                          <span className="text-slate-400">—</span>
+                          <span className="text-slate-400 font-mono text-xs">—</span>
                         )}
                       </div>
                     </td>

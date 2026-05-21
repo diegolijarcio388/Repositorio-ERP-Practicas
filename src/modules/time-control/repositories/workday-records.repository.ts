@@ -71,6 +71,19 @@ interface DbWorkdayRecordRow {
   updated_at: string;
 }
 
+const parseIncidentFlags = (rawValue: string | null): IncidentFlag[] | null => {
+  if (!rawValue) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed) ? (parsed as IncidentFlag[]) : null;
+  } catch {
+    return null;
+  }
+};
+
 const mapRow = (row: DbWorkdayRecordRow): WorkdayRecord => ({
   id: row.id,
   userId: row.user_id,
@@ -80,9 +93,7 @@ const mapRow = (row: DbWorkdayRecordRow): WorkdayRecord => ({
   status: row.status,
   workedMinutes: Number(row.worked_minutes),
   overtimeMinutes: Number(row.overtime_minutes),
-  incidentFlags: row.incident_flags
-    ? (JSON.parse(row.incident_flags) as IncidentFlag[])
-    : null,
+  incidentFlags: parseIncidentFlags(row.incident_flags),
   checkInLatitude: Number(row.check_in_latitude),
   checkInLongitude: Number(row.check_in_longitude),
   checkOutLatitude:

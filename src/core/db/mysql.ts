@@ -13,8 +13,8 @@ const getDatabaseUrl = (): string => {
   const candidate =
     runtimeEnv?.MYSQL_URL ??
     runtimeEnv?.DATABASE_URL ??
-    import.meta.env.MYSQL_URL ??
-    import.meta.env.DATABASE_URL;
+    import.meta.env?.MYSQL_URL ??
+    import.meta.env?.DATABASE_URL;
   if (!candidate) {
     throw new Error("MYSQL_URL no configurado.");
   }

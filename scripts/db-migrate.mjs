@@ -71,12 +71,36 @@ const hasColumn = async (tableName, columnName) => {
   return rows[0].total > 0;
 };
 
+const hasTable = async (tableName) => {
+  const [rows] = await pool.query(
+    `
+      SELECT COUNT(*) AS total
+      FROM INFORMATION_SCHEMA.TABLES
+      WHERE TABLE_SCHEMA = DATABASE()
+        AND TABLE_NAME = ?
+    `,
+    [tableName],
+  );
+  return rows[0].total > 0;
+};
+
 const maybeBaselineExistingSchema = async (appliedMigrations) => {
   if (appliedMigrations.size > 0) return appliedMigrations;
 
-  // Si la BD ya venía migrada antes de introducir schema_migrations,
-  // inicializamos el historial para evitar rejecutar alteraciones antiguas.
-  const schemaLooksFullyMigrated = await hasColumn("users", "job_title");
+  const schemaChecks = await Promise.all([
+    hasColumn("users", "job_title"),
+    hasColumn("users", "can_manage_time_control_requests"),
+    hasColumn("users", "time_control_device_policy"),
+    hasColumn("users", "can_manage_vacations"),
+    hasColumn("users", "can_manage_projects"),
+    hasColumn("workday_adjustment_requests", "coordinator_comment"),
+    hasColumn("workday_adjustment_requests", "reviewed_by_admin_id"),
+    hasColumn("workday_incident_justifications", "hidden_by_worker"),
+    hasColumn("workday_records", "admin_validation_reason"),
+    hasTable("time_control_allowed_locations"),
+  ]);
+
+  const schemaLooksFullyMigrated = schemaChecks.every(Boolean);
   if (!schemaLooksFullyMigrated) return appliedMigrations;
 
   if (migrationFiles.length === 0) return appliedMigrations;

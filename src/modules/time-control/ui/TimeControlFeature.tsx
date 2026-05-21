@@ -28,17 +28,17 @@ const STATUS_LABELS: Record<WorkdayStatus, string> = {
 };
 
 const STATUS_CLASSES: Record<WorkdayStatus, string> = {
-  OPEN: "bg-amber-100 text-amber-800",
-  COMPLETED: "bg-emerald-100 text-emerald-800",
-  INCOMPLETE: "bg-slate-100 text-slate-700",
-  INCIDENT: "bg-rose-100 text-rose-800",
+  OPEN: "border border-amber-500 bg-transparent text-amber-700",
+  COMPLETED: "border border-emerald-500 bg-transparent text-emerald-700",
+  INCOMPLETE: "border border-slate-400 bg-transparent text-slate-600",
+  INCIDENT: "border border-rose-500 bg-transparent text-rose-700",
 };
 
 const CALENDAR_STATUS_BADGE_CLASSES: Record<WorkdayStatus, string> = {
-  OPEN: "bg-amber-100 text-amber-800",
-  COMPLETED: "bg-emerald-100 text-emerald-800",
-  INCOMPLETE: "bg-slate-200 text-slate-700",
-  INCIDENT: "bg-rose-100 text-rose-700",
+  OPEN: "border border-amber-500 bg-transparent text-amber-700",
+  COMPLETED: "border border-emerald-500 bg-transparent text-emerald-700",
+  INCOMPLETE: "border border-slate-400 bg-transparent text-slate-600",
+  INCIDENT: "border border-rose-500 bg-transparent text-rose-700",
 };
 
 const ADJUSTMENT_STATUS_LABELS: Record<AdjustmentRequestStatus, string> = {
@@ -49,10 +49,10 @@ const ADJUSTMENT_STATUS_LABELS: Record<AdjustmentRequestStatus, string> = {
 };
 
 const ADJUSTMENT_STATUS_CLASSES: Record<AdjustmentRequestStatus, string> = {
-  PENDING_COORDINATOR: "bg-amber-100 text-amber-800",
-  PENDING_ADMIN: "bg-orange-100 text-orange-800",
-  APPROVED: "bg-emerald-100 text-emerald-800",
-  REJECTED: "bg-rose-100 text-rose-800",
+  PENDING_COORDINATOR: "border border-amber-500 bg-transparent text-amber-700",
+  PENDING_ADMIN: "border border-orange-500 bg-transparent text-orange-700",
+  APPROVED: "border border-emerald-500 bg-transparent text-emerald-700",
+  REJECTED: "border border-rose-500 bg-transparent text-rose-700",
 };
 
 const ADJUSTMENT_TYPE_LABELS: Record<AdjustmentRequestType, string> = {
@@ -61,8 +61,8 @@ const ADJUSTMENT_TYPE_LABELS: Record<AdjustmentRequestType, string> = {
 };
 
 const ADJUSTMENT_TYPE_CLASSES: Record<AdjustmentRequestType, string> = {
-  CHECK_IN: "bg-sky-100 text-sky-800",
-  CHECK_OUT: "bg-violet-100 text-violet-800",
+  CHECK_IN: "border border-sky-500 bg-transparent text-sky-700",
+  CHECK_OUT: "border border-violet-500 bg-transparent text-violet-700",
 };
 
 const INCIDENT_JUSTIFICATION_STATUS_LABELS: Record<
@@ -79,10 +79,10 @@ const INCIDENT_JUSTIFICATION_STATUS_CLASSES: Record<
   WorkdayIncidentJustification["status"],
   string
 > = {
-  PENDING_COORDINATOR: "bg-amber-100 text-amber-800",
-  PENDING_ADMIN: "bg-orange-100 text-orange-800",
-  APPROVED: "bg-emerald-100 text-emerald-800",
-  REJECTED: "bg-rose-100 text-rose-800",
+  PENDING_COORDINATOR: "border border-amber-500 bg-transparent text-amber-700",
+  PENDING_ADMIN: "border border-orange-500 bg-transparent text-orange-700",
+  APPROVED: "border border-emerald-500 bg-transparent text-emerald-700",
+  REJECTED: "border border-rose-500 bg-transparent text-rose-700",
 };
 
 const formatDateTime = (value: string | null): string => {
@@ -197,6 +197,57 @@ const getRecordLine = (
   const checkIn = formatTimeOnly(record.checkInAt);
   const checkOut = formatTimeOnly(record.checkOutAt);
   return `${checkIn}-${checkOut === "-" ? "??" : checkOut}`;
+};
+
+const formatCoordinate = (value: number | null | undefined): string => {
+  if (!Number.isFinite(value)) return "-";
+  return Number(value).toFixed(6);
+};
+
+const getAdminValidationReasonLabel = (record: WorkdayRecord): string | null => {
+  switch (record.adminValidationReason) {
+    case "OUTSIDE_ALLOWED_LOCATION":
+      return "Fuera de sede";
+    case "DEVICE_NOT_ALLOWED":
+      return "Dispositivo no permitido";
+    case "DESKTOP_DEVICE":
+      return "Uso desde escritorio";
+    case "UNKNOWN_DEVICE":
+      return "Dispositivo no identificado";
+    case "EXTERNAL_NETWORK":
+      return "Red externa";
+    default:
+      return null;
+  }
+};
+
+const isPendingAdminValidation = (record: WorkdayRecord): boolean =>
+  record.requiresAdminValidation && record.adminValidationStatus === "PENDING";
+
+const getTrustTooltip = (record: WorkdayRecord): string | undefined => {
+  if (getDisplayTrustLevel(record) === "MEDIA") {
+    return "Requiere revisión administrativa";
+  }
+  return undefined;
+};
+
+const getIncidentFlagMessage = (flag: IncidentFlag): string => {
+  switch (flag) {
+    case "DURATION_TOO_SHORT":
+      return "Duración demasiado corta";
+    case "DURATION_TOO_LONG":
+      return "Duración demasiado larga";
+    case "NO_CHECKOUT":
+      return "Falta fichaje de salida";
+    case "OUT_OF_SCHEDULE":
+      return "Fichaje fuera del rango horario permitido";
+    case "OUT_OF_ALLOWED_LOCATION":
+      return "Fichaje fuera del punto de fichaje permitido";
+    case "DEVICE_NOT_ALLOWED":
+      return "Fichaje desde dispositivo no permitido";
+    default:
+      return flag;
+  }
 };
 
 const formatBalance = (minutes: number): string => {
@@ -323,10 +374,10 @@ const DETAIL_LINK_CLASSES: Record<WorkdayStatus, string> = {
 };
 
 const TRUST_LEVEL_CLASSES: Record<WorkdayTrustLevel, string> = {
-  ALTA: "bg-emerald-100 text-emerald-800",
-  MEDIA: "bg-sky-100 text-sky-800",
-  BAJA: "bg-rose-100 text-rose-800",
-  INVÁLIDA: "bg-rose-100 text-rose-800",
+  ALTA: "border border-emerald-500 bg-transparent text-emerald-700",
+  MEDIA: "border border-sky-500 bg-transparent text-sky-700",
+  BAJA: "border border-amber-500 bg-transparent text-amber-700",
+  INVÁLIDA: "border border-rose-500 bg-transparent text-rose-700",
 };
 
 const TRUST_LEVEL_LABELS: Record<WorkdayTrustLevel, string> = {
@@ -335,6 +386,83 @@ const TRUST_LEVEL_LABELS: Record<WorkdayTrustLevel, string> = {
   BAJA: "Incidencia",
   INVÁLIDA: "Inválida",
 };
+
+const RECORD_STATE_LEGEND_ITEMS = [
+  {
+    label: "Completada",
+    borderClass: "border-emerald-500",
+    dotClass: "bg-emerald-500",
+    textClass: "text-emerald-700",
+  },
+  {
+    label: "Abierta",
+    borderClass: "border-amber-500",
+    dotClass: "bg-amber-500",
+    textClass: "text-amber-700",
+  },
+  {
+    label: "Incidencia",
+    borderClass: "border-rose-500",
+    dotClass: "bg-rose-500",
+    textClass: "text-rose-700",
+  },
+  {
+    label: "Revisar",
+    borderClass: "border-sky-500",
+    dotClass: "bg-sky-500",
+    textClass: "text-sky-700",
+  },
+  {
+    label: "Incompleta",
+    borderClass: "border-slate-400",
+    dotClass: "bg-slate-400",
+    textClass: "text-slate-600",
+  },
+] as const;
+
+const RECORD_VALIDATION_LEGEND_ITEMS = [
+  {
+    label: "Correcta",
+    borderClass: "border-emerald-500",
+    dotClass: "bg-emerald-500",
+    textClass: "text-emerald-700",
+  },
+  {
+    label: "Revisar",
+    borderClass: "border-sky-500",
+    dotClass: "bg-sky-500",
+    textClass: "text-sky-700",
+  },
+  {
+    label: "Incidencia",
+    borderClass: "border-amber-500",
+    dotClass: "bg-amber-500",
+    textClass: "text-amber-700",
+  },
+  {
+    label: "Inválida",
+    borderClass: "border-rose-500",
+    dotClass: "bg-rose-500",
+    textClass: "text-rose-700",
+  },
+] as const;
+
+const renderLegendChip = (item: {
+  label: string;
+  borderClass: string;
+  dotClass: string;
+  textClass: string;
+}) => (
+  <span
+    key={item.label}
+    className={`inline-flex items-center gap-1.5 rounded-full border ${item.borderClass} bg-transparent px-2.5 py-1`}
+  >
+    <span className={`h-1.5 w-1.5 rounded-full ${item.dotClass}`} />
+    <span className={`text-[10px] font-semibold ${item.textClass}`}>
+      {item.label}
+    </span>
+  </span>
+);
 
 const DEVICE_TYPE_LABELS: Record<WorkdayDeviceType, string> = {
   MOBILE: "Móvil",
@@ -348,10 +476,10 @@ const getDisplayTrustLevel = (record: WorkdayRecord): WorkdayTrustLevel =>
 
 const getRecordNetworkLabel = (record: WorkdayRecord): string => {
   if (!record.checkInIpAddress?.trim()) {
-    return "Red no validada";
+    return "Sin contexto de red";
   }
 
-  return record.isTrustedNetwork ? "Red confiable" : "Red externa";
+  return "Red registrada";
 };
 
 const getRecordContextLine = (record: WorkdayRecord): string => {
@@ -442,10 +570,10 @@ const EXCLUSION_REQUEST_STATUS_LABELS: Record<ExclusionRequestStatus, string> = 
 };
 
 const EXCLUSION_REQUEST_STATUS_CLASSES: Record<ExclusionRequestStatus, string> = {
-  PENDING_COORDINATOR: "bg-amber-100 text-amber-800",
-  PENDING_ADMIN: "bg-orange-100 text-orange-800",
-  APPROVED: "bg-emerald-100 text-emerald-800",
-  REJECTED: "bg-rose-100 text-rose-800",
+  PENDING_COORDINATOR: "border border-amber-500 bg-transparent text-amber-700",
+  PENDING_ADMIN: "border border-orange-500 bg-transparent text-orange-700",
+  APPROVED: "border border-emerald-500 bg-transparent text-emerald-700",
+  REJECTED: "border border-rose-500 bg-transparent text-rose-700",
 };
 
 const normalizeDateTimeLocalToSql = (value: string): string => {
@@ -457,7 +585,121 @@ const normalizeDateTimeLocalToSql = (value: string): string => {
     : `${normalized}.000`;
 };
 
+const getMinutesFromTimeValue = (value?: string | null): number | null => {
+  if (!value) return null;
+  const [hours, minutes] = value.split(":").map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return hours * 60 + minutes;
+};
+
+const getMinutesFromSqlDateTime = (value?: string | null): number | null =>
+  getMinutesFromTimeValue(getTimeOnlyFromSqlDateTime(value));
+
+const doesHourlySlotMatchRecord = (
+  record: WorkdayRecord,
+  hour: number,
+): boolean => {
+  const recordStartMinutes = getMinutesFromSqlDateTime(record.checkInAt);
+  if (recordStartMinutes === null) {
+    return false;
+  }
+
+  let recordEndMinutes = getMinutesFromSqlDateTime(record.checkOutAt);
+  if (recordEndMinutes === null) {
+    if (record.status === "OPEN" && record.workDate === getTodaySqlDate()) {
+      const now = new Date();
+      recordEndMinutes = now.getHours() * 60 + now.getMinutes();
+    } else {
+      recordEndMinutes = recordStartMinutes + 1;
+    }
+  }
+
+  const slotStartMinutes = hour * 60;
+  const slotEndMinutes = slotStartMinutes + 60;
+
+  return (
+    recordStartMinutes < slotEndMinutes && recordEndMinutes > slotStartMinutes
+  );
+};
+
+const getHourlySlotRecordPriority = (record: WorkdayRecord): number => {
+  if (record.status === "INCIDENT") return 500;
+  if (record.status === "INCOMPLETE") return 400;
+  if (record.status === "OPEN") return 300;
+  if (
+    record.requiresAdminValidation &&
+    record.adminValidationStatus === "PENDING"
+  ) {
+    return 200;
+  }
+  if (record.status === "COMPLETED") return 100;
+  return 0;
+};
+
+const getHourlySlotRecord = (
+  records: WorkdayRecord[],
+  hour: number,
+): WorkdayRecord | undefined =>
+  records
+    .filter((record) => doesHourlySlotMatchRecord(record, hour))
+    .sort(
+      (left, right) =>
+        getHourlySlotRecordPriority(right) -
+        getHourlySlotRecordPriority(left),
+    )[0];
+
+const getQuadrantRecordColorClasses = (record: WorkdayRecord): string => {
+  if (record.status === "INCOMPLETE") {
+    return "bg-slate-400 shadow-slate-100";
+  }
+
+  if (record.status === "OPEN") {
+    return "bg-amber-500 shadow-amber-100";
+  }
+
+  if (record.status === "INCIDENT") {
+    return "bg-rose-500 shadow-rose-100";
+  }
+
+  switch (getDisplayTrustLevel(record)) {
+    case "ALTA":
+      return "bg-emerald-500 shadow-emerald-100";
+    case "MEDIA":
+      return "bg-sky-500 shadow-sky-100";
+    case "BAJA":
+      return "bg-amber-500 shadow-amber-100";
+    case "INVÁLIDA":
+      return "bg-rose-500 shadow-rose-100";
+    default:
+      return "bg-slate-400 shadow-slate-100";
+  }
+};
+
 const getStatusDetail = (record: WorkdayRecord): string => {
+  if (
+    record.requiresAdminValidation &&
+    record.adminValidationStatus === "PENDING"
+  ) {
+    const reasonLabel = getAdminValidationReasonLabel(record);
+    const incidentDetails = record.incidentFlags?.length
+      ? record.incidentFlags.map(getIncidentFlagMessage).join(", ")
+      : null;
+
+    if (reasonLabel && incidentDetails) {
+      return `${reasonLabel}. Revisión administrativa pendiente. ${incidentDetails}.`;
+    }
+
+    if (reasonLabel) {
+      return `${reasonLabel}. Revisión administrativa pendiente.`;
+    }
+
+    if (incidentDetails) {
+      return `Fichaje pendiente de revisión administrativa. ${incidentDetails}.`;
+    }
+
+    return "Fichaje pendiente de revisión administrativa.";
+  }
+
   if (record.status === "COMPLETED") {
     return "Fichaje completado sin problemas.";
   }
@@ -483,24 +725,7 @@ const getStatusDetail = (record: WorkdayRecord): string => {
     return "Incidencia detectada sin detalle adicional.";
   }
 
-  const messages = record.incidentFlags.map((flag) => {
-    switch (flag) {
-      case "DURATION_TOO_SHORT":
-        return "Duración demasiado corta";
-      case "DURATION_TOO_LONG":
-        return "Duración demasiado larga";
-      case "NO_CHECKOUT":
-        return "Falta fichaje de salida";
-      case "OUT_OF_SCHEDULE":
-        return "Fichaje fuera del rango horario permitido";
-      case "OUT_OF_ALLOWED_LOCATION":
-        return "Fichaje fuera del punto de fichaje permitido";
-      case "DEVICE_NOT_ALLOWED":
-        return "Fichaje desde dispositivo no permitido";
-      default:
-        return flag;
-    }
-  });
+  const messages = record.incidentFlags.map(getIncidentFlagMessage);
 
   return messages.join(", ");
 };
@@ -509,7 +734,6 @@ const JUSTIFIABLE_INCIDENT_FLAGS: IncidentFlag[] = [
   "DURATION_TOO_SHORT",
   "DURATION_TOO_LONG",
   "OUT_OF_SCHEDULE",
-  "OUT_OF_ALLOWED_LOCATION",
 ];
 
 const hasJustifiableIncident = (flags: IncidentFlag[] | null): boolean =>
@@ -563,6 +787,10 @@ export function TimeControlFeature({
   const showWorkerRequests = isWorkerMode && workerView === "requests";
   const viewedTabsStorageKey = useMemo(
     () => `time-control:viewed-tabs:${mode}:${session.email}`,
+    [mode, session.email],
+  );
+  const selectedMonthStorageKey = useMemo(
+    () => `time-control:selected-month:${mode}:${session.email}`,
     [mode, session.email],
   );
   const [records, setRecords] = useState<WorkdayRecord[]>([]);
@@ -625,6 +853,13 @@ export function TimeControlFeature({
   const [managerHourFrom, setManagerHourFrom] = useState("");
   const [managerHourTo, setManagerHourTo] = useState("");
   const [managerTrustFilter, setManagerTrustFilter] = useState<
+    "" | WorkdayTrustLevel
+  >("");
+  const [trackerUserFilter, setTrackerUserFilter] = useState("");
+  const [trackerStatusFilter, setTrackerStatusFilter] = useState<
+    "" | WorkdayStatus
+  >("");
+  const [trackerTrustFilter, setTrackerTrustFilter] = useState<
     "" | WorkdayTrustLevel
   >("");
 
@@ -809,6 +1044,9 @@ export function TimeControlFeature({
     tone: "success" | "error";
     message: string;
   } | null>(null);
+  const lastLoadRecordsErrorRef = useRef<string | null>(null);
+  const loadRecordsPromiseRef = useRef<Promise<void> | null>(null);
+  const loadRecordsQueuedRef = useRef(false);
   const [actionPopup, setActionPopup] = useState<{
     tone: "loading";
     message: string;
@@ -1195,6 +1433,36 @@ export function TimeControlFeature({
           ? excludedTodayUsers
           : [];
 
+  const managerTrackerMembers = useMemo(
+    () =>
+      teamMembers.filter((member) => {
+        if (trackerUserFilter && member.id !== trackerUserFilter) {
+          return false;
+        }
+
+        const userRecords = trackerDateRecordsMap.get(member.id) ?? [];
+
+        if (
+          trackerStatusFilter &&
+          !userRecords.some((record) => record.status === trackerStatusFilter)
+        ) {
+          return false;
+        }
+
+        if (
+          trackerTrustFilter &&
+          !userRecords.some(
+            (record) => getDisplayTrustLevel(record) === trackerTrustFilter,
+          )
+        ) {
+          return false;
+        }
+
+        return true;
+      }),
+    [teamMembers, trackerDateRecordsMap, trackerStatusFilter, trackerTrustFilter, trackerUserFilter],
+  );
+
   const incidentJustificationsByRecordId = useMemo(
     () =>
       new Map(
@@ -1365,23 +1633,24 @@ export function TimeControlFeature({
       : "md:grid-cols-2";
 
   useEffect(() => {
-    if (!canViewTeamRecords && managerReviewTab === "records") {
-      setManagerReviewTab(canReviewAdjustmentRequests ? "requests" : "incidents");
-      return;
-    }
-    if (!canReviewAdjustmentRequests && managerReviewTab === "requests") {
-      setManagerReviewTab("incidents");
-    }
-    if (!canReviewIncidentRequests && managerReviewTab === "incidents") {
-      setManagerReviewTab(
-        canReviewAdjustmentRequests ? "requests" : canReviewExclusionRequests ? "exclusions" : "records",
-      );
-      return;
-    }
-    if (!canReviewExclusionRequests && managerReviewTab === "exclusions") {
-      setManagerReviewTab(canReviewAdjustmentRequests ? "requests" : "incidents");
+    if (!isManagerMode) return;
+
+    const hasPermissionForTab = (tab: typeof managerReviewTab) => {
+      if (tab === "records") return canViewTeamRecords;
+      if (tab === "requests") return canReviewAdjustmentRequests;
+      if (tab === "incidents") return canReviewIncidentRequests;
+      if (tab === "exclusions") return canReviewExclusionRequests;
+      return false;
+    };
+
+    if (!hasPermissionForTab(managerReviewTab)) {
+      if (canViewTeamRecords) setManagerReviewTab("records");
+      else if (canReviewAdjustmentRequests) setManagerReviewTab("requests");
+      else if (canReviewIncidentRequests) setManagerReviewTab("incidents");
+      else if (canReviewExclusionRequests) setManagerReviewTab("exclusions");
     }
   }, [
+    isManagerMode,
     canReviewAdjustmentRequests,
     canReviewExclusionRequests,
     canReviewIncidentRequests,
@@ -1390,38 +1659,73 @@ export function TimeControlFeature({
   ]);
 
   const loadRecords = async (signal?: AbortSignal) => {
-    setLoading(true);
-    try {
-      const response = await fetch(endpointBase, { signal });
-      const data = (await response.json()) as {
-        items?: WorkdayRecord[];
-        error?: string;
-      };
-
-      if (!response.ok) {
-        throw new Error(data.error ?? "No se pudieron cargar los registros.");
+    if (loadRecordsPromiseRef.current) {
+      if (!signal) {
+        loadRecordsQueuedRef.current = true;
       }
+      return loadRecordsPromiseRef.current;
+    }
 
-      setRecords(data.items ?? []);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        setToast({
-          tone: "error",
-          message:
-            "La carga de registros está tardando demasiado. Recarga la pantalla o inténtalo de nuevo en unos segundos.",
-        });
-        return;
-      }
+    const loadTask = (async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(endpointBase, { signal });
+        const data = (await response.json()) as {
+          items?: WorkdayRecord[];
+          error?: string;
+        };
 
-      setToast({
-        tone: "error",
-        message:
+        if (!response.ok) {
+          throw new Error(data.error || `Error ${response.status}: No se pudieron cargar los registros. Data: ${JSON.stringify(data)}`);
+        }
+
+        setRecords(data.items ?? []);
+        lastLoadRecordsErrorRef.current = null;
+      } catch (error) {
+        if (
+          (signal && signal.aborted) ||
+          (error instanceof DOMException && error.name === "AbortError") ||
+          (error && typeof error === "object" && (error as any).name === "AbortError") ||
+          (error && typeof error === "object" && String((error as any).message).toLowerCase().includes("abort")) ||
+          (error && typeof error === "object" && String((error as any).message).toLowerCase().includes("cleanup"))
+        ) {
+          return;
+        }
+
+        const errorMessage =
           error instanceof Error
             ? error.message
-            : "No se pudieron cargar los registros.",
-      });
+            : typeof error === "string"
+            ? error
+            : error && typeof error === "object" && "message" in error
+            ? (error as any).message
+            : "No se pudieron cargar los registros.";
+
+        if (lastLoadRecordsErrorRef.current === errorMessage) {
+          return;
+        }
+
+        lastLoadRecordsErrorRef.current = errorMessage;
+        setToast({
+          tone: "error",
+          message: errorMessage,
+        });
+      } finally {
+        setLoading(false);
+      }
+    })();
+
+    loadRecordsPromiseRef.current = loadTask;
+
+    try {
+      await loadTask;
     } finally {
-      setLoading(false);
+      loadRecordsPromiseRef.current = null;
+
+      if (loadRecordsQueuedRef.current && !signal?.aborted) {
+        loadRecordsQueuedRef.current = false;
+        void loadRecords();
+      }
     }
   };
 
@@ -1525,13 +1829,9 @@ export function TimeControlFeature({
       setMyRemoteWorkRequests(remoteData.items ?? []);
       setMyPermissionRequests(permissionData.items ?? []);
     } catch (error) {
-      setToast({
-        tone: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "No se pudieron cargar las solicitudes de teletrabajo/permiso.",
-      });
+      console.error("Error al cargar solicitudes de teletrabajo/permiso:", error);
+      setMyRemoteWorkRequests([]);
+      setMyPermissionRequests([]);
     } finally {
       setMyExclusionRequestsLoading(false);
     }
@@ -1660,13 +1960,9 @@ export function TimeControlFeature({
       setPendingRemoteWorkRequests(remoteData.items ?? []);
       setPendingPermissionRequests(permissionData.items ?? []);
     } catch (error) {
-      setToast({
-        tone: "error",
-        message:
-          error instanceof Error
-            ? error.message
-            : "No se pudieron cargar solicitudes de teletrabajo/permiso.",
-      });
+      console.error("Error al cargar solicitudes pendientes de teletrabajo/permiso:", error);
+      setPendingRemoteWorkRequests([]);
+      setPendingPermissionRequests([]);
     } finally {
       setPendingExclusionRequestsLoading(false);
     }
@@ -1732,15 +2028,11 @@ export function TimeControlFeature({
 
   useEffect(() => {
     const controller = new AbortController();
-    const timeoutId = window.setTimeout(() => controller.abort(), 12000);
 
-    void loadRecords(controller.signal).finally(() => {
-      window.clearTimeout(timeoutId);
-    });
+    void loadRecords(controller.signal);
 
     return () => {
-      window.clearTimeout(timeoutId);
-      controller.abort();
+      controller.abort("cleanup");
     };
   }, [endpointBase]);
 
@@ -1766,6 +2058,27 @@ export function TimeControlFeature({
       // Ignore storage errors; the UI still works in-memory.
     }
   }, [viewedTabs, viewedTabsStorageKey]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(selectedMonthStorageKey);
+      if (!raw || !/^\d{4}-\d{2}$/.test(raw)) {
+        return;
+      }
+
+      setSelectedMonth(raw);
+    } catch {
+      // Ignore storage errors; the UI still works with the current month.
+    }
+  }, [selectedMonthStorageKey]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(selectedMonthStorageKey, selectedMonth);
+    } catch {
+      // Ignore storage errors; the UI still works in-memory.
+    }
+  }, [selectedMonth, selectedMonthStorageKey]);
 
   useEffect(() => {
     if (!isWorkerMode) return;
@@ -2406,6 +2719,454 @@ export function TimeControlFeature({
     }
   };
 
+  const applyUpdatedRecord = (updatedRecord: WorkdayRecord) => {
+    setRecords((current) =>
+      current.map((record) =>
+        record.id === updatedRecord.id ? updatedRecord : record,
+      ),
+    );
+    setSelectedRecordForDetail((current) =>
+      current?.id === updatedRecord.id ? updatedRecord : current,
+    );
+  };
+
+  const reviewRecordAdminValidation = async (
+    recordId: string,
+    status: "APPROVED" | "REJECTED",
+  ) => {
+    setReviewSubmittingId(recordId);
+    showLoadingPopup(
+      status === "APPROVED"
+        ? "Validando fichaje..."
+        : "Rechazando validación...",
+    );
+
+    try {
+      const trimmedReviewComment = (reviewComments[recordId] ?? "").trim();
+
+      if (status === "REJECTED" && !trimmedReviewComment) {
+        throw new Error("Debes indicar un motivo para rechazar el fichaje.");
+      }
+
+      const response = await fetch(
+        `/api/time-control/records/${recordId}/admin-validation`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            status,
+            comment: trimmedReviewComment,
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readApiErrorMessage(
+            response,
+            "No se pudo revisar el fichaje.",
+          ),
+        );
+      }
+
+      const data = (await response.json()) as {
+        item?: WorkdayRecord;
+        error?: string;
+      };
+
+      if (data.item) {
+        applyUpdatedRecord(data.item);
+      }
+
+      setReviewComments((current) => ({
+        ...current,
+        [recordId]: "",
+      }));
+
+      await loadRecords();
+      hideLoadingPopup();
+      setToast({
+        tone: "success",
+        message:
+          status === "APPROVED"
+            ? "Fichaje validado correctamente."
+            : "Fichaje rechazado correctamente.",
+      });
+    } catch (error) {
+      hideLoadingPopup();
+      setToast({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "No se pudo revisar el fichaje.",
+      });
+    } finally {
+      setReviewSubmittingId(null);
+    }
+  };
+
+  const renderRecordAdminValidationPanel = (record: WorkdayRecord) => {
+    if (!isManagerMode || !isFunctionalAdmin || !isPendingAdminValidation(record)) {
+      return null;
+    }
+
+    return (
+      <div className="mt-4 rounded-2xl border border-sky-100 bg-sky-50/50 p-4 shadow-sm backdrop-blur-sm transition-all hover:shadow-md">
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <span className="inline-flex rounded-lg bg-sky-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.15em] text-white shadow-sm shadow-sky-500/20">
+              Revisión administrativa
+            </span>
+          </div>
+          <p className="text-xs font-medium text-sky-900/80 leading-relaxed mt-1">
+            Confirma la validez de la ubicación externa del fichaje o recházala indicando un motivo.
+          </p>
+        </div>
+        
+        <div className="mt-3.5 relative">
+          <textarea
+            className="h-24 w-full resize-none rounded-xl border border-sky-100 bg-white/80 px-3.5 py-2.5 text-sm text-slate-800 placeholder-slate-400 outline-none transition focus:border-sky-300 focus:bg-white focus:ring-4 focus:ring-sky-500/10 shadow-inner"
+            placeholder="Añade un comentario para la revisión (obligatorio al rechazar)..."
+            value={reviewComments[record.id] ?? ""}
+            onChange={(event) =>
+              setReviewComments((current) => ({
+                ...current,
+                [record.id]: event.target.value,
+              }))
+            }
+          />
+        </div>
+        
+        <div className="mt-3 flex items-center justify-end gap-2.5 border-t border-sky-100/50 pt-3">
+          <button
+            type="button"
+            className="rounded-xl border border-rose-200 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-700 transition-all hover:bg-rose-100 hover:text-rose-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer shadow-sm hover:shadow"
+            onClick={() => reviewRecordAdminValidation(record.id, "REJECTED")}
+            disabled={reviewSubmittingId === record.id}
+          >
+            Rechazar
+          </button>
+          <button
+            type="button"
+            className="rounded-xl bg-emerald-600 px-4 py-2 text-xs font-semibold text-white transition-all hover:bg-emerald-700 hover:shadow-emerald-600/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer shadow-md shadow-emerald-600/10"
+            onClick={() => reviewRecordAdminValidation(record.id, "APPROVED")}
+            disabled={reviewSubmittingId === record.id}
+          >
+            Validar
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const renderRecordDetailContent = (record: WorkdayRecord) => {
+    const trustLevel = getDisplayTrustLevel(record);
+    const trustLabel = getDisplayTrustLabel(record);
+    const trustClass = TRUST_LEVEL_CLASSES[trustLevel];
+    const hasIncident = record.status === "INCIDENT";
+    const displayStatus = STATUS_LABELS[record.status];
+    const expectedMinutes = 480;
+    const workedPercent = Math.min(
+      100,
+      Math.round((record.workedMinutes / expectedMinutes) * 100),
+    );
+
+    const getMapsUrl = (lat: number | null, lng: number | null): string => {
+      if (lat === null || lng === null) return "";
+      return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    };
+
+    return (
+      <div className="space-y-5 text-left">
+        <div className="relative overflow-hidden rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white p-5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Fecha de jornada
+              </span>
+              <h4 className="mt-0.5 text-base font-semibold text-slate-800">
+                {formatShortDate(record.workDate)}
+              </h4>
+            </div>
+            <div className="flex items-center gap-1.5 font-sans">
+              <span
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${CALENDAR_STATUS_BADGE_CLASSES[record.status]}`}
+              >
+                {displayStatus}
+              </span>
+              <span
+                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${trustClass}`}
+                title={getTrustTooltip(record)}
+              >
+                <svg
+                  className="mr-1 h-3 w-3"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2.5"
+                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                  />
+                </svg>
+                {trustLabel}
+              </span>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
+            <div>
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Rango horario
+              </span>
+              <div className="mt-0.5 flex items-center gap-1.5">
+                <svg
+                  className="h-4 w-4 shrink-0 text-slate-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth="2"
+                    d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+                </svg>
+                <span className="font-mono text-xl font-bold tracking-tight text-slate-800">
+                  {getRecordLine(record)}
+                </span>
+              </div>
+            </div>
+            <div className="shrink-0 sm:text-right">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                Tiempo computado
+              </span>
+              <p className="mt-0.5 font-mono text-2xl font-black tracking-tight text-slate-900">
+                {formatHoursFromMinutes(record.workedMinutes)}
+              </p>
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="mb-1 flex items-center justify-between text-[11px] font-medium text-slate-400">
+              <span>Progreso de jornada</span>
+              <span className="font-semibold text-slate-600">
+                {workedPercent}% del objetivo
+              </span>
+            </div>
+            <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-slate-100 shadow-inner">
+              <div
+                className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r ${
+                  record.status === "INCIDENT"
+                    ? "from-rose-400 to-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]"
+                    : record.status === "COMPLETED"
+                      ? "from-emerald-400 to-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]"
+                      : "from-sky-400 to-sky-500 shadow-[0_0_8px_rgba(56,189,248,0.3)]"
+                }`}
+                style={{ width: `${workedPercent}%` }}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
+          <div className="flex items-center justify-between gap-3">
+            <h5 className="text-xs font-bold uppercase tracking-widest text-slate-400">
+              Registro de eventos
+            </h5>
+            <span className="text-xs text-slate-400">
+              Datos técnicos plegables
+            </span>
+          </div>
+
+          <div className="space-y-3">
+            <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 ring-4 ring-emerald-50 shadow-sm">
+                    <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                  </div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
+                    Entrada registrada
+                  </span>
+                  <span className="rounded bg-white px-2 py-0.5 text-[11px] font-bold text-slate-500">
+                    {record.checkInDeviceType || "Dispositivo"}
+                  </span>
+                </div>
+                <span className="font-mono text-lg font-bold text-slate-800">
+                  {formatTimeOnly(record.checkInAt)}
+                </span>
+              </div>
+              <details className="group mt-2">
+                <summary className="cursor-pointer list-none text-xs font-semibold text-slate-500 transition hover:text-sky-700">
+                  Ver datos técnicos de entrada
+                </summary>
+                <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-white/90 p-3 text-xs text-slate-600">
+                  <p>
+                    <span className="font-semibold text-slate-700">IP:</span>{" "}
+                    {record.checkInIpAddress || "—"}
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-slate-700">
+                      Ubicación:
+                    </span>
+                    {record.checkInLatitude !== null &&
+                    record.checkInLongitude !== null ? (
+                      <a
+                        href={getMapsUrl(
+                          record.checkInLatitude,
+                          record.checkInLongitude,
+                        )}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                      >
+                        <svg
+                          className="mr-1 h-3.5 w-3.5 shrink-0 text-slate-400"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                          />
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth="2"
+                            d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                          />
+                        </svg>
+                        {record.checkInLatitude.toFixed(6)},{" "}
+                        {record.checkInLongitude.toFixed(6)}
+                      </a>
+                    ) : (
+                      <span className="text-slate-400">—</span>
+                    )}
+                  </div>
+                </div>
+              </details>
+            </div>
+
+            <div className="rounded-xl border border-rose-100 bg-rose-50/30 px-4 py-3">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-400 ring-4 ring-rose-50 shadow-sm">
+                    <div className="h-1.5 w-1.5 rounded-full bg-white" />
+                  </div>
+                  <span className="text-xs font-bold uppercase tracking-wider text-rose-600">
+                    Salida registrada
+                  </span>
+                  {record.checkOutAt ? (
+                    <span className="rounded bg-white px-2 py-0.5 text-[11px] font-bold text-slate-500">
+                      {record.checkOutDeviceType || "Dispositivo"}
+                    </span>
+                  ) : null}
+                </div>
+                <span className="font-mono text-lg font-bold text-slate-800">
+                  {record.checkOutAt
+                    ? formatTimeOnly(record.checkOutAt)
+                    : "Sin registrar"}
+                </span>
+              </div>
+              {record.checkOutAt ? (
+                <details className="group mt-2">
+                  <summary className="cursor-pointer list-none text-xs font-semibold text-slate-500 transition hover:text-sky-700">
+                    Ver datos técnicos de salida
+                  </summary>
+                  <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-white/90 p-3 text-xs text-slate-600">
+                    <p>
+                      <span className="font-semibold text-slate-700">IP:</span>{" "}
+                      {record.checkOutIpAddress || "—"}
+                    </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-slate-700">
+                        Ubicación:
+                      </span>
+                      {record.checkOutLatitude !== null &&
+                      record.checkOutLongitude !== null ? (
+                        <a
+                          href={getMapsUrl(
+                            record.checkOutLatitude,
+                            record.checkOutLongitude,
+                          )}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+                        >
+                          <svg
+                            className="mr-1 h-3.5 w-3.5 shrink-0 text-slate-400"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth="2"
+                              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                            />
+                          </svg>
+                          {record.checkOutLatitude.toFixed(6)},{" "}
+                          {record.checkOutLongitude.toFixed(6)}
+                        </a>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </div>
+                  </div>
+                </details>
+              ) : null}
+            </div>
+          </div>
+        </div>
+
+        {hasIncident && (
+          <div className="flex items-start rounded-2xl border border-rose-100 bg-rose-50/40 p-4">
+            <svg
+              className="mr-3 mt-0.5 h-5 w-5 shrink-0 text-rose-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            <div>
+              <h6 className="text-xs font-bold uppercase tracking-wider text-rose-700">
+                Detalles de la incidencia
+              </h6>
+              <p className="mt-1 text-sm font-medium leading-relaxed text-rose-900">
+                {getStatusDetail(record)}
+              </p>
+            </div>
+          </div>
+        )}
+
+        {renderRecordAdminValidationPanel(record)}
+      </div>
+    );
+  };
+
   return (
     <>
       <style>
@@ -2837,6 +3598,44 @@ export function TimeControlFeature({
                     </div>
                   </div>
 
+                  <div className="border-b border-slate-100 bg-slate-50/70 px-5 py-3">
+                    <div className="flex flex-wrap items-center justify-between gap-3">
+                      <div className="space-y-1">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          Mes activo
+                        </p>
+                        <p className="text-sm text-slate-700">
+                          Las solicitudes e incidencias se cargan para{" "}
+                          <span className="font-medium text-slate-900">
+                            {formatMonthLabel(selectedMonth)}
+                          </span>
+                          .
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1 self-start">
+                        <Button
+                          variant="secondary"
+                          onClick={() =>
+                            setSelectedMonth((current) => shiftMonthValue(current, -1))
+                          }
+                        >
+                          {"<"}
+                        </Button>
+                        <span className="min-w-[132px] text-center text-sm font-medium text-slate-700">
+                          {formatMonthLabel(selectedMonth)}
+                        </span>
+                        <Button
+                          variant="secondary"
+                          onClick={() =>
+                            setSelectedMonth((current) => shiftMonthValue(current, 1))
+                          }
+                        >
+                          {">"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
                   {workerRequestsTab === "incidents" ? (
                     <div
                       className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
@@ -2917,13 +3716,13 @@ export function TimeControlFeature({
                                             {getRecordLine(record)}
                                           </span>
                                           <span
-                                            className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${CALENDAR_STATUS_BADGE_CLASSES[record.status]}`}
+                                            className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_BADGE_CLASSES[record.status]}`}
                                           >
                                             {STATUS_LABELS[record.status]}
                                           </span>
                                           {justification ? (
                                             <span
-                                              className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${INCIDENT_JUSTIFICATION_STATUS_CLASSES[justification.status]}`}
+                                              className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${INCIDENT_JUSTIFICATION_STATUS_CLASSES[justification.status]}`}
                                             >
                                               {
                                                 INCIDENT_JUSTIFICATION_STATUS_LABELS[
@@ -3156,7 +3955,7 @@ export function TimeControlFeature({
                                           {request.status !== "REJECTED" ? (
                                             "-"
                                           ) : (
-                                            <span className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase ${request.reviewedByAdminId ? "bg-rose-100 text-rose-700" : "bg-orange-100 text-orange-700"}`}>
+                                            <span className={`inline-flex rounded-full border bg-transparent px-2 py-0.5 text-[10px] font-bold uppercase ${request.reviewedByAdminId ? "border-rose-500 text-rose-700" : "border-orange-500 text-orange-700"}`}>
                                               {request.reviewedByAdminId ? "Admin" : "Coordinador"}
                                             </span>
                                           )}
@@ -3201,7 +4000,7 @@ export function TimeControlFeature({
                       }}
                       className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-indigo-300 hover:shadow-md active:scale-[0.98]"
                     >
-                      <div className="absolute -right-4 -top-4 h-16 w-16 rounded-full bg-indigo-50/60 transition-transform duration-500 group-hover:scale-[1.8]" />
+                      <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
 
                       <div className="relative flex h-full flex-col">
                         <div className="flex items-center justify-between">
@@ -3241,7 +4040,7 @@ export function TimeControlFeature({
                     }}
                     className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-sky-300 hover:shadow-md active:scale-[0.98]"
                   >
-                    <div className="absolute -right-4 -top-4 h-16 w-16 rounded-full bg-sky-50/60 transition-transform duration-500 group-hover:scale-[1.8]" />
+                      <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
 
                     <div className="relative flex h-full flex-col">
                       <div className="flex items-center justify-between">
@@ -3275,7 +4074,7 @@ export function TimeControlFeature({
                     onClick={() => setShowManagerIncidentsModal(true)}
                     className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-orange-300 hover:shadow-md active:scale-[0.98]"
                   >
-                    <div className="absolute -right-4 -top-4 h-16 w-16 rounded-full bg-orange-50/60 transition-transform duration-500 group-hover:scale-[1.8]" />
+                    <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-orange-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
 
                     <div className="relative flex h-full flex-col">
                       <div className="flex items-center justify-between">
@@ -3361,7 +4160,7 @@ export function TimeControlFeature({
                         onClick={() => setManagerDailyListType("checked-in")}
                         className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-emerald-300 hover:shadow-md active:scale-[0.98]"
                       >
-                        <div className="absolute -right-4 -top-4 h-16 w-16 rounded-full bg-emerald-50/60 transition-transform duration-500 group-hover:scale-[1.8]" />
+                      <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
 
                         <div className="relative flex h-full flex-col">
                           <div className="flex items-center justify-between">
@@ -3404,7 +4203,7 @@ export function TimeControlFeature({
                         onClick={() => setManagerDailyListType("missing")}
                         className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-rose-300 hover:shadow-md active:scale-[0.98]"
                       >
-                        <div className="absolute -right-4 -top-4 h-16 w-16 rounded-full bg-rose-50/60 transition-transform duration-500 group-hover:scale-[1.8]" />
+                      <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
 
                         <div className="relative flex h-full flex-col">
                           <div className="flex items-center justify-between">
@@ -3445,7 +4244,7 @@ export function TimeControlFeature({
                         className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-slate-400 hover:shadow-md active:scale-[0.98]"
                       >
                         {/* Efecto de círculo de fondo */}
-                        <div className="absolute -right-4 -top-4 h-16 w-16 rounded-full bg-slate-50 transition-transform duration-500 group-hover:scale-[1.8]" />
+                      <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
 
                         <div className="relative flex h-full flex-col">
                           <div className="flex items-center justify-between">
@@ -3484,17 +4283,17 @@ export function TimeControlFeature({
               {canViewTeamRecords ? (
                 <div className="mb-12 overflow-hidden rounded-[2.5rem] border border-slate-200 bg-white shadow-sm transition-all hover:shadow-md" id="cuadrante-diario">
                   {/* Cabecera del Cuadrante */}
-                  <div className="border-b border-slate-100 p-8">
-                    <div className="flex flex-wrap items-center justify-between gap-6">
+                  <div className="border-b border-slate-100 p-5 lg:p-6">
+                    <div className="flex flex-wrap items-start justify-between gap-4">
                       <div className="space-y-1">
                         <div className="flex items-center gap-2">
                           <div className="h-4 w-1 rounded-full bg-indigo-600" />
                           <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">Visualizador Temporal</span>
                         </div>
-                        <h3 className="text-xl font-black text-slate-900 tracking-tight">
+                        <h3 className="text-lg font-black text-slate-900 tracking-tight lg:text-xl">
                           Cuadrante de fichajes
                         </h3>
-                        <p className="text-sm text-slate-500">
+                        <p className="max-w-2xl text-sm text-slate-500">
                           Distribución horaria de la actividad del equipo por slots de 60 minutos.
                         </p>
                       </div>
@@ -3532,108 +4331,155 @@ export function TimeControlFeature({
                       </div>
                     </div>
 
-                    {/* Leyenda Evolucionada */}
-                    {/* Leyenda del cuadrante con estilo Soft & Glass */}
-                    <div className="mb-8 flex flex-wrap items-center gap-3 border-t border-slate-50 pt-6">
-                      <span className="mr-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
-                        Estados:
-                      </span>
-                      {[
-                        { border: "border-emerald-500", dot: "bg-emerald-500", text: "text-emerald-700", label: "Completada" },
-                        { border: "border-amber-500", dot: "bg-amber-500", text: "text-amber-700", label: "Abierta" },
-                        { border: "border-rose-500", dot: "bg-rose-500", text: "text-rose-700", label: "Incidencia" },
-                        { border: "border-sky-500", dot: "bg-sky-500", text: "text-sky-700", label: "Revisar" },
-                        { border: "border-slate-400", dot: "bg-slate-400", text: "text-slate-600", label: "Incompleta" },
-                      ].map((item) => (
-                        <div
-                          key={item.label}
-                          className={`flex items-center gap-1.5 rounded-full border ${item.border} bg-transparent px-2.5 py-1 transition-all hover:scale-105`}
+                    <div className="mt-4 space-y-2 border-t border-slate-50 pt-4">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="mr-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          Estado:
+                        </span>
+                        {RECORD_STATE_LEGEND_ITEMS
+                          .filter((item) => item.label !== "Revisar")
+                          .map(renderLegendChip)}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="mr-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                          Validación:
+                        </span>
+                        {RECORD_VALIDATION_LEGEND_ITEMS.map(renderLegendChip)}
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-3 md:grid-cols-2 xl:grid-cols-[minmax(0,280px)_160px_160px_120px] xl:justify-start">
+                      <div className="xl:max-w-[280px]">
+                        <Select
+                          id="trackerUserFilter"
+                          label="Trabajador"
+                          value={trackerUserFilter}
+                          onChange={(event) => setTrackerUserFilter(event.target.value)}
+                          options={[
+                            { value: "", label: "Todos" },
+                            ...teamMembers.map((member) => ({
+                              value: member.id,
+                              label: member.name,
+                            })),
+                          ]}
+                        />
+                      </div>
+                      <Select
+                        id="trackerStatusFilter"
+                        label="Estado"
+                        value={trackerStatusFilter}
+                        onChange={(event) =>
+                          setTrackerStatusFilter(event.target.value as "" | WorkdayStatus)
+                        }
+                        options={[
+                          { value: "", label: "Todos" },
+                          { value: "COMPLETED", label: "Completada" },
+                          { value: "OPEN", label: "Abierta" },
+                          { value: "INCIDENT", label: "Incidencia" },
+                          { value: "INCOMPLETE", label: "Incompleta" },
+                        ]}
+                      />
+                      <Select
+                        id="trackerTrustFilter"
+                        label="Validación"
+                        value={trackerTrustFilter}
+                        onChange={(event) =>
+                          setTrackerTrustFilter(event.target.value as "" | WorkdayTrustLevel)
+                        }
+                        options={[
+                          { value: "", label: "Todas" },
+                          { value: "ALTA", label: "Correcta" },
+                          { value: "MEDIA", label: "Revisar" },
+                          { value: "BAJA", label: "Incidencia" },
+                          { value: "INVÁLIDA", label: "Inválida" },
+                        ]}
+                      />
+                      <div className="flex items-end">
+                        <Button
+                          variant="secondary"
+                          className="h-[40px] w-full px-3"
+                          onClick={() => {
+                            setTrackerUserFilter("");
+                            setTrackerStatusFilter("");
+                            setTrackerTrustFilter("");
+                          }}
                         >
-                          <span className={`h-1.5 w-1.5 rounded-full ${item.dot}`} />
-                          <span className={`text-[10px] font-semibold ${item.text}`}>
-                            {item.label}
-                          </span>
-                        </div>
-                      ))}
+                          Limpiar
+                        </Button>
+                      </div>
                     </div>
                   </div>
 
                   {/* Rejilla Horaria con diseño de Slots */}
                   <div className="relative bg-white p-4">
-                    <div className="overflow-x-auto rounded-[1.5rem] border border-slate-100">
-                      <table className="w-full border-collapse text-xs">
-                        <thead>
-                          <tr className="bg-slate-50/50">
-                            <th className="sticky left-0 z-30 min-w-[240px] border-b border-r border-slate-100 bg-slate-50 px-6 py-4 text-left font-black uppercase tracking-widest text-slate-400">
-                              Trabajador
-                            </th>
-                            {Array.from({ length: 15 }, (_, i) => i + 6).map((h) => (
-                              <th key={`h-${h}`} className="min-w-[64px] border-b border-slate-100 px-2 py-4 text-center font-bold text-slate-400">
-                                {String(h).padStart(2, "0")}:00
+                    {managerTrackerMembers.length === 0 ? (
+                      <div className="flex h-32 items-center justify-center rounded-[1.5rem] border border-dashed border-slate-200 bg-slate-50/40">
+                        <p className="text-sm text-slate-500">
+                          No hay trabajadores que coincidan con los filtros del cuadrante.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto rounded-[1.5rem] border border-slate-100">
+                        <table className="w-full border-collapse text-xs">
+                          <thead>
+                            <tr className="bg-slate-50/50">
+                              <th className="sticky left-0 z-30 min-w-[240px] border-b border-r border-slate-100 bg-slate-50 px-6 py-4 text-left font-black uppercase tracking-widest text-slate-400">
+                                Trabajador
                               </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {teamMembers.map((member) => {
-                            const userRecords = trackerDateRecordsMap.get(member.id) || [];
-                            return (
-                              <tr key={`q-row-${member.id}`} className="group hover:bg-slate-50/30">
-                                <td className="sticky left-0 z-20 min-w-[240px] border-b border-r border-slate-100 bg-white px-6 py-4 font-bold text-slate-700 group-hover:bg-slate-50/80 transition-colors">
-                                  <div className="flex items-center gap-2">
-                                    <div className="h-1.5 w-1.5 rounded-full bg-slate-300 group-hover:bg-indigo-400 transition-colors" />
-                                    {member.name}
-                                  </div>
-                                </td>
-                                {Array.from({ length: 15 }, (_, i) => i + 6).map((h) => {
-                                  const matchingRecord = userRecords.find(r => {
-                                    const [_, time] = r.checkInAt.split(" ");
-                                    const inH = parseInt(time.split(":")[0], 10);
-                                    let outH = 23;
-                                    if (r.checkOutAt) {
-                                      const [__, outTime] = r.checkOutAt.split(" ");
-                                      outH = parseInt(outTime.split(":")[0], 10);
-                                    } else if (r.status === "OPEN" && r.workDate === getTodaySqlDate()) {
-                                      outH = new Date().getHours();
-                                    }
-                                    return h >= inH && h <= outH;
-                                  });
+                              {Array.from({ length: 15 }, (_, i) => i + 6).map((h) => (
+                                <th key={`h-${h}`} className="min-w-[64px] border-b border-slate-100 px-2 py-4 text-center font-bold text-slate-400">
+                                  {String(h).padStart(2, "0")}:00
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {managerTrackerMembers.map((member) => {
+                              const userRecords = trackerDateRecordsMap.get(member.id) || [];
+                              return (
+                                <tr key={`q-row-${member.id}`} className="group hover:bg-slate-50/30">
+                                  <td className="sticky left-0 z-20 min-w-[240px] border-b border-r border-slate-100 bg-white px-6 py-4 font-bold text-slate-700 group-hover:bg-slate-50/80 transition-colors">
+                                    <div className="flex items-center gap-2">
+                                      <div className="h-1.5 w-1.5 rounded-full bg-slate-300 group-hover:bg-indigo-400 transition-colors" />
+                                      {member.name}
+                                    </div>
+                                  </td>
+                                  {Array.from({ length: 15 }, (_, i) => i + 6).map((h) => {
+                                    const matchingRecord = getHourlySlotRecord(
+                                      userRecords,
+                                      h,
+                                    );
 
-                                  let bgColor = "bg-slate-50/50";
-                                  let opacity = "opacity-100";
+                                    let bgColor = "bg-slate-50/50";
+                                    let opacity = "opacity-100";
 
-                                  if (matchingRecord) {
-                                    if (matchingRecord.requiresAdminValidation && matchingRecord.adminValidationStatus === "PENDING") {
-                                      bgColor = "bg-sky-500 shadow-sky-100";
+                                    if (matchingRecord) {
+                                      bgColor =
+                                        getQuadrantRecordColorClasses(
+                                          matchingRecord,
+                                        );
                                     } else {
-                                      switch (matchingRecord.status) {
-                                        case "COMPLETED": bgColor = "bg-emerald-500 shadow-emerald-100"; break;
-                                        case "INCIDENT": bgColor = "bg-rose-500 shadow-rose-100"; break;
-                                        case "INCOMPLETE": bgColor = "bg-slate-400 shadow-slate-100"; break;
-                                        case "OPEN": bgColor = "bg-amber-500 shadow-amber-100"; break;
-                                      }
+                                      opacity = "opacity-20";
                                     }
-                                  } else {
-                                    opacity = "opacity-20";
-                                  }
 
-                                  return (
-                                    <td key={`cell-${member.id}-${h}`} className="border-b border-slate-100 p-1.5">
-                                      <div
-                                        onClick={() => matchingRecord && setSelectedRecordForDetail(matchingRecord)}
-                                        title={matchingRecord ? `Ver detalle de ${member.name}` : ""}
-                                        className={`h-9 w-full rounded-lg transition-all duration-300 ${bgColor} ${opacity} ${matchingRecord ? "shadow-lg scale-[1.02] ring-1 ring-white/20 cursor-pointer hover:brightness-110 active:scale-95" : "hover:bg-slate-200"
-                                          }`}
-                                      />
-                                    </td>
-                                  );
-                                })}
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
+                                    return (
+                                      <td key={`cell-${member.id}-${h}`} className="border-b border-slate-100 p-1.5">
+                                        <div
+                                          onClick={() => matchingRecord && setSelectedRecordForDetail(matchingRecord)}
+                                          title={matchingRecord ? `Ver detalle de ${member.name}` : ""}
+                                          className={`h-9 w-full rounded-lg transition-all duration-300 ${bgColor} ${opacity} ${matchingRecord ? "shadow-lg scale-[1.02] ring-1 ring-white/20 cursor-pointer hover:brightness-110 active:scale-95" : "hover:bg-slate-200"
+                                            }`}
+                                        />
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : null}
@@ -3953,13 +4799,7 @@ export function TimeControlFeature({
 
                                       <span
 
-                                        className={`inline-flex min-h-[32px] items-center rounded-full px-3 py-1 text-[11px] font-semibold leading-4 ${request.status === "PENDING_COORDINATOR"
-
-                                          ? "bg-amber-100 text-amber-700"
-
-                                          : "bg-blue-100 text-blue-700"
-
-                                          }`}
+                                        className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${ADJUSTMENT_STATUS_CLASSES[request.status]}`}
 
                                       >
 
@@ -4009,7 +4849,7 @@ export function TimeControlFeature({
 
                                                 variant="secondary"
 
-                                                className="rounded-xl border-rose-200 bg-rose-50 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                                                className="rounded-full border-rose-200 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-rose-700 shadow-none hover:bg-rose-50"
 
                                                 onClick={() => reviewRequest(request.id, "REJECTED")}
 
@@ -4023,7 +4863,7 @@ export function TimeControlFeature({
 
                                               <Button
 
-                                                className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold hover:bg-emerald-700"
+                                                className="rounded-full bg-emerald-600 px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-700"
 
                                                 onClick={() => reviewRequest(request.id, "APPROVED")}
 
@@ -4184,14 +5024,14 @@ export function TimeControlFeature({
                                               <button
                                                 onClick={() => reviewIncidentJustification(justification.id, "REJECTED")}
                                                 disabled={reviewSubmittingId === justification.id || !isFunctionalAdmin}
-                                                className="rounded-lg bg-rose-50 p-2 text-rose-600 hover:bg-rose-100 disabled:opacity-50"
+                                                className="rounded-full border border-rose-200 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
                                               >
                                                 Rechazar
                                               </button>
                                               <button
                                                 onClick={() => reviewIncidentJustification(justification.id, "APPROVED")}
                                                 disabled={reviewSubmittingId === justification.id || !isFunctionalAdmin}
-                                                className="rounded-lg bg-blue-600 p-2 text-white hover:bg-blue-700 disabled:opacity-50"
+                                                className="rounded-full bg-emerald-600 px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
                                               >
                                                 Aprobar
                                               </button>
@@ -4304,7 +5144,7 @@ export function TimeControlFeature({
                                   key={`anomaly-tab-${record.id}`}
                                   type="button"
                                   onClick={() => openManagerRecordDetail(record)}
-                                  className="grid w-full gap-2 px-4 py-3 text-left transition hover:bg-orange-50/40 md:grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,2fr)_120px] md:items-center md:gap-3"
+                                  className="group grid w-full gap-2 px-4 py-3 text-left transition hover:bg-orange-50/40 md:grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,2fr)_120px] md:items-center md:gap-3"
                                 >
                                   <div className="min-w-0">
                                     <p className="truncate text-sm font-semibold text-slate-900">
@@ -4338,10 +5178,10 @@ export function TimeControlFeature({
                                     </p>
                                   </div>
                                   <div className="flex items-center justify-between md:justify-end">
-                                    <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600">
+                                    <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600 transition-colors group-hover:text-orange-700">
                                       Abrir detalle
                                     </span>
-                                    <span className="text-sm text-slate-300 md:ml-2">→</span>
+                                    <span className="text-sm text-slate-300 transition-all group-hover:translate-x-0.5 group-hover:text-orange-400 md:ml-2">→</span>
                                   </div>
                                 </button>
                               ))}
@@ -4449,8 +5289,8 @@ export function TimeControlFeature({
                                   <td className="py-3 pr-4">
                                     <span
                                       className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${request.kind === "REMOTE_WORK"
-                                        ? "bg-indigo-100 text-indigo-800"
-                                        : "bg-cyan-100 text-cyan-800"
+                                        ? "border border-indigo-500 bg-transparent text-indigo-700"
+                                        : "border border-cyan-500 bg-transparent text-cyan-700"
                                         }`}
                                     >
                                       {request.kind === "REMOTE_WORK" ? "Teletrabajo" : "Permiso"}
@@ -4461,7 +5301,7 @@ export function TimeControlFeature({
                                   </td>
                                   <td className="py-3 pr-4">
                                     <span
-                                      className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${EXCLUSION_REQUEST_STATUS_CLASSES[request.status]}`}
+                                      className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${EXCLUSION_REQUEST_STATUS_CLASSES[request.status]}`}
                                     >
                                       {EXCLUSION_REQUEST_STATUS_LABELS[request.status]}
                                     </span>
@@ -4488,7 +5328,7 @@ export function TimeControlFeature({
                                     <div className="flex justify-end gap-2">
                                       <Button
                                         variant="secondary"
-                                        className="border-rose-200 px-3 py-1.5 text-xs text-rose-700 hover:bg-rose-50"
+                                        className="rounded-full border-rose-200 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-rose-700 shadow-none hover:bg-rose-50"
                                         onClick={() => reviewExclusionRequest(request, "REJECTED")}
                                         disabled={
                                           reviewSubmittingId === request.id ||
@@ -4498,7 +5338,7 @@ export function TimeControlFeature({
                                         Rechazar
                                       </Button>
                                       <Button
-                                        className={`${request.status === "PENDING_ADMIN" ? "bg-blue-600 hover:bg-blue-700" : ""} px-3 py-1.5 text-xs`}
+                                        className={`${request.status === "PENDING_ADMIN" ? "bg-emerald-600 hover:bg-emerald-700" : ""} rounded-full px-3.5 py-1.5 text-[12px] font-semibold text-white`}
                                         onClick={() => reviewExclusionRequest(request, "APPROVED")}
                                         disabled={
                                           reviewSubmittingId === request.id ||
@@ -4524,23 +5364,11 @@ export function TimeControlFeature({
                     className="bg-white p-6"
                     style={tabPanelAnimationStyle}
                   >
-                    <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600">
-                      <span className="inline-flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-emerald-500" />
-                        Completada
+                    <div className="mb-6 flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                      <span className="mr-2 text-[10px] font-black uppercase tracking-widest text-slate-400">
+                        Estados:
                       </span>
-                      <span className="inline-flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-rose-500" />
-                        Incidencia
-                      </span>
-                      <span className="inline-flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-amber-500" />
-                        Abierta
-                      </span>
-                      <span className="inline-flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-slate-400" />
-                        Incompleta
-                      </span>
+                      {RECORD_STATE_LEGEND_ITEMS.map(renderLegendChip)}
                     </div>
 
                     <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -4548,27 +5376,16 @@ export function TimeControlFeature({
                         Validación del fichaje
                       </p>
                       <div className="mt-3 flex flex-wrap items-center gap-2">
-                        <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-medium bg-emerald-100 text-emerald-800">
-                          Correcta
-                        </span>
-                        <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-medium bg-sky-100 text-sky-800">
-                          Revisar
-                        </span>
-                        <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-medium bg-amber-100 text-amber-800">
-                          Incidencia
-                        </span>
-                        <span className="inline-flex rounded-full px-2.5 py-1 text-xs font-medium bg-rose-100 text-rose-800">
-                          Inválida
-                        </span>
+                        {RECORD_VALIDATION_LEGEND_ITEMS.map(renderLegendChip)}
                       </div>
                       <div className="mt-3 grid gap-2 text-xs text-slate-600 md:grid-cols-2">
                         <p>
                           <span className="font-medium text-slate-900">Correcta:</span>{" "}
-                          ubicación válida, dispositivo esperado y red confiable.
+                          coordenadas válidas y dispositivo esperado.
                         </p>
                         <p>
                           <span className="font-medium text-slate-900">Revisar:</span>{" "}
-                          ubicación válida y dispositivo esperado, pero con menos contexto de red.
+                          coordenadas válidas con contexto técnico que conviene revisar.
                         </p>
                         <p>
                           <span className="font-medium text-slate-900">Incidencia:</span>{" "}
@@ -4579,9 +5396,7 @@ export function TimeControlFeature({
                           datos insuficientes o coordenadas no válidas.
                         </p>
                       </div>
-                      <div className="mt-2 text-[11px] italic text-slate-500 border-t border-slate-100 pt-2">
-                        💡 Consejo: Pasa el cursor sobre las etiquetas de la columna "Validación" para ver los detalles técnicos (dispositivo, red e IP).
-                      </div>
+                      
                     </div>
 
                     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
@@ -4672,7 +5487,7 @@ export function TimeControlFeature({
                                     {STATUS_LABELS[record.status]}
                                   </span>
                                 </td>
-                                <td className="py-3 pr-4" title={getRecordContextLine(record)}>
+                                <td className="py-3 pr-4" title={getTrustTooltip(record)}>
                                   <span
                                     className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${TRUST_LEVEL_CLASSES[getDisplayTrustLevel(record)]}`}
                                   >
@@ -4680,7 +5495,21 @@ export function TimeControlFeature({
                                   </span>
                                 </td>
                                 <td className="py-3 pr-4 text-slate-700">
-                                  {getStatusDetail(record)}
+                                  <div className="space-y-2">
+                                    <p>{getStatusDetail(record)}</p>
+                                    <button
+                                      type="button"
+                                      className="group inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
+                                      onClick={() => setSelectedRecordForDetail(record)}
+                                    >
+                                      <span>
+                                        {isPendingAdminValidation(record)
+                                          ? "Abrir y validar"
+                                          : "Abrir detalle"}
+                                      </span>
+                                      <span className="transition-transform group-hover:translate-x-0.5">→</span>
+                                    </button>
+                                  </div>
                                 </td>
                               </tr>
                             ))}
@@ -4813,7 +5642,7 @@ export function TimeControlFeature({
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
             <div className="flex flex-col items-center text-center">
               <div
-                className={`mb-4 flex h-14 w-14 items-center justify-center rounded-full ${toast.tone === "success"
+                className={`relative mb-4 h-14 w-14 shrink-0 rounded-full ${toast.tone === "success"
                   ? "bg-emerald-100 text-emerald-700"
                   : "bg-rose-100 text-rose-700"
                   }`}
@@ -4825,7 +5654,7 @@ export function TimeControlFeature({
                     fill="none"
                     stroke="currentColor"
                     strokeWidth={2}
-                    className="h-7 w-7"
+                    className="absolute inset-0 m-auto block h-6 w-6"
                   >
                     <path
                       strokeLinecap="round"
@@ -4840,7 +5669,7 @@ export function TimeControlFeature({
                     fill="none"
                     stroke="currentColor"
                     strokeWidth={2}
-                    className="h-7 w-7"
+                    className="absolute inset-0 m-auto block h-6 w-6"
                   >
                     <path
                       strokeLinecap="round"
@@ -5029,15 +5858,28 @@ export function TimeControlFeature({
       {showManagerIncidentsModal ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
           <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
-            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-4 py-3">
-              <div className="space-y-1">
-                <p className="text-sm font-medium text-slate-800">
-                  Incidencias en el rango actual
+            <div className="flex flex-wrap items-start justify-between gap-2 border-b border-slate-200 px-5 py-4">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-widest text-slate-400">
+                  Rango actual
                 </p>
-                <p className="text-xs text-slate-500">
-                  {managerIncidentRecords.length} registro
-                  {managerIncidentRecords.length === 1 ? "" : "s"} con incidencia
+                <p className="mt-0.5 text-base font-medium text-slate-900">
+                  Registros con anomalías
                 </p>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {managerIncidentRecords.filter(r => r.status === "INCIDENT").length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
+                      <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
+                      {managerIncidentRecords.filter(r => r.status === "INCIDENT").length} incidencia{managerIncidentRecords.filter(r => r.status === "INCIDENT").length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                  {managerIncidentRecords.filter(r => r.status === "INCOMPLETE").length > 0 && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+                      <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+                      {managerIncidentRecords.filter(r => r.status === "INCOMPLETE").length} incompleta{managerIncidentRecords.filter(r => r.status === "INCOMPLETE").length !== 1 ? "s" : ""}
+                    </span>
+                  )}
+                </div>
               </div>
               <Button
                 variant="secondary"
@@ -5047,48 +5889,48 @@ export function TimeControlFeature({
               </Button>
             </div>
 
-            <div className="max-h-[65vh] overflow-y-auto px-4 py-4">
+            <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
               {managerIncidentRecords.length === 0 ? (
                 <p className="text-sm text-slate-500">
                   No hay incidencias en el conjunto filtrado actualmente.
                 </p>
               ) : (
-                <div className="space-y-3">
+                <div className="space-y-2">
                   {managerIncidentRecords.map((record) => (
                     <div
                       key={`manager-incident-${record.id}`}
-                      // CAMBIO: Pasamos de rose-50 a amber-50 y de rose-200 a amber-200
-                      className="rounded-xl border border-amber-200 bg-amber-50/40 px-4 py-3"
+                      className={`rounded-xl border px-4 py-3 ${record.status === "INCOMPLETE" ? "border-slate-200 bg-white" : "border-rose-200 bg-white"}`}
                     >
-                      <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-medium text-slate-900">
-                          {getDisplayUserName(
-                            record.userId,
-                            record.userName,
-                          )}
-                        </span>
-                        <span className="text-slate-500">•</span>
-                        <span className="text-slate-700">
-                          {formatShortDate(record.workDate)}
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="text-sm font-medium text-slate-900">
+                          {getDisplayUserName(record.userId, record.userName)}
                         </span>
                         <span
-                          className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${STATUS_CLASSES[record.status]
-                            }`}
+                          className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${record.status === "INCOMPLETE" ? "border-slate-300 text-slate-600" : "border-rose-400 text-rose-700"}`}
                         >
+                          <span className={`h-1.5 w-1.5 rounded-full ${record.status === "INCOMPLETE" ? "bg-slate-400" : "bg-rose-500"}`} />
                           {STATUS_LABELS[record.status]}
                         </span>
                       </div>
-                      <p className="mt-2 text-sm text-slate-700">
+                      <p className="mt-1.5 text-sm text-slate-500">
                         {getRecordLine(record)}
                       </p>
-                      {/* CAMBIO: Pasamos de text-rose-700 a text-amber-700 */}
-                      <p className="mt-1 text-sm font-medium text-amber-800">
+                      <p className="mt-0.5 text-sm text-slate-600">
                         {getStatusDetail(record)}
                       </p>
                     </div>
                   ))}
                 </div>
               )}
+            </div>
+
+            <div className="flex items-center gap-2 border-t border-slate-100 px-5 py-3">
+              <svg className="h-4 w-4 shrink-0 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+              </svg>
+              <p className="text-xs text-slate-400">
+                Las justificaciones enviadas por los trabajadores aparecerán en <span className="font-medium text-slate-500">Incidencias</span> para su revisión.
+              </p>
             </div>
           </div>
         </div>
@@ -5113,39 +5955,8 @@ export function TimeControlFeature({
 
             <div className="max-h-[65vh] space-y-3 overflow-y-auto px-4 py-4">
               {selectedDetailRecords.map((record) => (
-                <div
-                  key={`detail-${record.id}`}
-                  className={`rounded-xl border p-3 ${record.status === "INCIDENT"
-                    ? "border-rose-300 bg-rose-50"
-                    : record.status === "COMPLETED"
-                      ? "border-emerald-200 bg-emerald-50"
-                      : "border-slate-200 bg-stone-50"
-                    }`}
-                >
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="text-base font-medium text-slate-800">
-                      {getRecordLine(record)}
-                    </span>
-                    <span
-                      className={`inline-flex rounded-full px-2 py-0.5 text-xs font-medium ${CALENDAR_STATUS_BADGE_CLASSES[record.status]}`}
-                    >
-                      {STATUS_LABELS[record.status]}
-                    </span>
-                  </div>
-                  <div className="mt-3">
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-                      <div
-                        className={`h-full rounded-full ${getRecordBarClass(record.status)}`}
-                        style={{ width: getRecordBarWidth(record) }}
-                      />
-                    </div>
-                    <div className="mt-2 text-xs text-slate-500">
-                      Trabajado: {formatHoursFromMinutes(record.workedMinutes)}
-                    </div>
-                  </div>
-                  <p className="mt-2 text-sm text-slate-700">
-                    {getStatusDetail(record)}
-                  </p>
+                <div key={`detail-${record.id}`} className="p-1">
+                  {renderRecordDetailContent(record)}
                 </div>
               ))}
 
@@ -5382,63 +6193,7 @@ export function TimeControlFeature({
         onClose={() => setSelectedRecordForDetail(null)}
         title="Detalle del Fichaje"
       >
-        {selectedRecordForDetail && (
-          <div className="space-y-4">
-            {/* Cabecera estilo captura */}
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-lg font-bold text-slate-800">
-                Detalle de el {new Date(selectedRecordForDetail.workDate).toLocaleDateString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric' })}
-              </h3>
-              <button
-                onClick={() => setSelectedRecordForDetail(null)}
-                className="rounded-xl bg-slate-100 px-6 py-2.5 text-sm font-bold text-slate-900 transition-colors hover:bg-slate-200"
-              >
-                Cerrar
-              </button>
-            </div>
-
-            {/* Tarjeta Principal Verde */}
-            <div className="rounded-[2rem] border border-emerald-100 bg-emerald-50/40 p-8 shadow-sm">
-              <div className="mb-6 flex items-center gap-4">
-                <span className="text-2xl font-black tracking-tight text-slate-800">
-                  {formatDateTime(selectedRecordForDetail.checkInAt).split(" ")[1]} - {selectedRecordForDetail.checkOutAt ? formatDateTime(selectedRecordForDetail.checkOutAt).split(" ")[1] : "En curso"}
-                </span>
-                <span className={`rounded-full px-4 py-1 text-[11px] font-bold ${STATUS_CLASSES[selectedRecordForDetail.status]}`}>
-                  {STATUS_LABELS[selectedRecordForDetail.status]}
-                </span>
-              </div>
-
-              {/* Barra de Progreso */}
-              <div className="relative mb-6 h-3 w-full rounded-full bg-slate-200/50">
-                <div
-                  className="h-full rounded-full bg-emerald-500 transition-all duration-1000"
-                  style={{ width: `${Math.min(((selectedRecordForDetail.workedMinutes || 0) / 480) * 100, 100)}%` }}
-                />
-              </div>
-
-              <div className="space-y-2">
-                <p className="text-sm font-medium text-slate-500">
-                  Trabajado: {formatHoursFromMinutes(selectedRecordForDetail.workedMinutes)}
-                </p>
-                <p className="text-lg font-semibold text-slate-700">
-                  {selectedRecordForDetail.incidentFlags && selectedRecordForDetail.incidentFlags.length > 0
-                    ? "Se han detectado incidencias en este fichaje."
-                    : "Fichaje completado sin problemas."}
-                </p>
-              </div>
-            </div>
-
-            {/* Tarjeta de Total */}
-            <div className="rounded-[2rem] border border-slate-100 bg-slate-50/50 p-8">
-              <p className="mb-3 text-[11px] font-black uppercase tracking-widest text-slate-400">
-                Total trabajado del día
-              </p>
-              <p className="text-4xl font-black tracking-tighter text-slate-900">
-                {formatHoursFromMinutes(selectedRecordForDetail.workedMinutes)}
-              </p>
-            </div>
-          </div>
-        )}
+        {selectedRecordForDetail && renderRecordDetailContent(selectedRecordForDetail)}
       </Modal>
     </>
   );
