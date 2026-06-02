@@ -15,6 +15,7 @@ interface DbUserRow {
   role: VacationRole;
   can_manage_time_control_requests: 0 | 1;
   time_control_device_policy: TimeControlDevicePolicy;
+  time_control_shift_id: string | null;
   can_manage_vacations: 0 | 1;
   can_manage_projects: 0 | 1;
 }
@@ -28,12 +29,13 @@ const mapUserRow = (row: DbUserRow): UserDirectoryRecord => ({
   role: row.role,
   canManageTimeControlRequests: Boolean(row.can_manage_time_control_requests),
   timeControlDevicePolicy: row.time_control_device_policy,
+  timeControlShiftId: row.time_control_shift_id,
   canManageVacations: Boolean(row.can_manage_vacations),
   canManageProjects: Boolean(row.can_manage_projects),
 });
 
 const USER_SELECT =
-  "SELECT id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, can_manage_vacations, can_manage_projects FROM users";
+  "SELECT id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, time_control_shift_id, can_manage_vacations, can_manage_projects FROM users";
 
 const isRecoverableDirectoryReadError = (error: unknown): boolean => {
   const errorRecord =
@@ -194,12 +196,13 @@ export class DirectoryRepository {
     role: string;
     canManageTimeControlRequests?: boolean;
     timeControlDevicePolicy?: TimeControlDevicePolicy;
+    timeControlShiftId?: string | null;
     canManageVacations?: boolean;
     canManageProjects?: boolean;
   }): Promise<UserDirectoryRecord> {
     const id = crypto.randomUUID();
     await getMySqlPool().query(
-      "INSERT INTO users (id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, can_manage_vacations, can_manage_projects) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO users (id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, time_control_shift_id, can_manage_vacations, can_manage_projects) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         id,
         input.name.trim(),
@@ -209,6 +212,7 @@ export class DirectoryRepository {
         input.role,
         input.canManageTimeControlRequests ? 1 : 0,
         input.timeControlDevicePolicy ?? "TABLET_ONLY",
+        input.timeControlShiftId ?? null,
         input.canManageVacations ? 1 : 0,
         input.canManageProjects ? 1 : 0,
       ],
@@ -230,6 +234,7 @@ export class DirectoryRepository {
       role?: string;
       canManageTimeControlRequests?: boolean;
       timeControlDevicePolicy?: TimeControlDevicePolicy;
+      timeControlShiftId?: string | null;
       canManageVacations?: boolean;
       canManageProjects?: boolean;
     },
@@ -263,6 +268,10 @@ export class DirectoryRepository {
     if (input.timeControlDevicePolicy !== undefined) {
       fields.push("time_control_device_policy = ?");
       values.push(input.timeControlDevicePolicy);
+    }
+    if ("timeControlShiftId" in input) {
+      fields.push("time_control_shift_id = ?");
+      values.push(input.timeControlShiftId ?? null);
     }
     if (input.canManageVacations !== undefined) {
       fields.push("can_manage_vacations = ?");

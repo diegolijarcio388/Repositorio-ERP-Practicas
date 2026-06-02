@@ -4,6 +4,7 @@ import type {
   CloseCheckOutInput,
   CreateCheckInInput,
   IncidentFlag,
+  TimeControlShift,
   TimeControlAdminValidationReason,
   TimeControlAdminValidationStatus,
   WorkdayDeviceType,
@@ -16,16 +17,28 @@ import {
   type WorkdayRecordsRepository,
 } from "../repositories/workday-records.repository";
 import { createTimeControlAllowedLocationsService } from "./time-control-allowed-locations.service";
+import { createTimeControlShiftsService } from "./time-control-shifts.service";
 import { createTimeControlTrustedNetworksService } from "./time-control-trusted-networks.service";
 
-const MIN_EXPECTED_WORKDAY_MINUTES = 7 * 60 + 45;
-const MAX_EXPECTED_WORKDAY_MINUTES = 8 * 60 + 15;
-const STANDARD_WORKDAY_MINUTES = 480;
+const WORKDAY_DURATION_TOLERANCE_MINUTES = 15;
+const DEFAULT_EXPECTED_WORKDAY_MINUTES = 480;
 const BUSINESS_TIME_ZONE = "Europe/Madrid";
-const SCHEDULE_START_MINUTES = 6 * 60;
-const SCHEDULE_END_MINUTES = 7 * 60 + 30;
+const DEFAULT_SCHEDULE_START_MINUTES = 6 * 60;
+const DEFAULT_SCHEDULE_END_MINUTES = 7 * 60 + 30;
 const pad = (value: number, length = 2): string =>
   String(value).padStart(length, "0");
+
+interface ResolvedShiftSegment {
+  id: string;
+  shiftId: string;
+  shiftName: string;
+  segmentOrder: number;
+  startMinutes: number;
+  endMinutes: number;
+  toleranceStartMinutes: number;
+  toleranceEndMinutes: number;
+  expectedWorkedMinutes: number;
+}
 
 const getDatePartsInTimeZone = (value: Date) => {
   const formatter = new Intl.DateTimeFormat("sv-SE", {
@@ -89,38 +102,178 @@ const calculateWorkedDurationMs = (
 const calculateWorkedMinutes = (diffMs: number): number =>
   diffMs <= 0 ? 0 : Math.floor(diffMs / 60000);
 
-const calculateOvertimeMinutes = (workedMinutes: number): number =>
-  workedMinutes > STANDARD_WORKDAY_MINUTES
-    ? workedMinutes - STANDARD_WORKDAY_MINUTES
+const calculateOvertimeMinutes = (
+  workedMinutes: number,
+  expectedWorkedMinutes = DEFAULT_EXPECTED_WORKDAY_MINUTES,
+): number =>
+  workedMinutes > expectedWorkedMinutes
+    ? workedMinutes - expectedWorkedMinutes
     : 0;
 
-const buildIncidentFlags = (workedMinutes: number): IncidentFlag[] | null => {
+const buildIncidentFlags = (
+  workedMinutes: number,
+  expectedWorkedMinutes = DEFAULT_EXPECTED_WORKDAY_MINUTES,
+): IncidentFlag[] | null => {
   const flags: IncidentFlag[] = [];
+  const minimumExpectedMinutes = Math.max(
+    0,
+    expectedWorkedMinutes - WORKDAY_DURATION_TOLERANCE_MINUTES,
+  );
+  const maximumExpectedMinutes =
+    expectedWorkedMinutes + WORKDAY_DURATION_TOLERANCE_MINUTES;
 
-  if (workedMinutes < MIN_EXPECTED_WORKDAY_MINUTES) {
+  if (workedMinutes < minimumExpectedMinutes) {
     flags.push("DURATION_TOO_SHORT");
   }
 
-  if (workedMinutes > MAX_EXPECTED_WORKDAY_MINUTES) {
+  if (workedMinutes > maximumExpectedMinutes) {
     flags.push("DURATION_TOO_LONG");
   }
 
   return flags.length > 0 ? flags : null;
 };
 
-const buildCheckInIncidentFlags = (value: Date): IncidentFlag[] | null => {
+const buildCheckInIncidentFlags = (
+  value: Date,
+  resolvedSegment?: ResolvedShiftSegment | null,
+): IncidentFlag[] | null => {
   const { hour, minute } = getDatePartsInTimeZone(value);
   const totalMinutes = Number(hour) * 60 + Number(minute);
+  const scheduleStartMinutes =
+    resolvedSegment?.startMinutes ?? DEFAULT_SCHEDULE_START_MINUTES;
+  const scheduleEndMinutes =
+    resolvedSegment === null
+      ? Number.NaN
+      : resolvedSegment
+        ? normalizeMinutes(
+            scheduleStartMinutes + resolvedSegment.toleranceEndMinutes,
+          )
+        : DEFAULT_SCHEDULE_END_MINUTES;
+  const windowStartMinutes = resolvedSegment
+    ? normalizeMinutes(
+        scheduleStartMinutes - resolvedSegment.toleranceStartMinutes,
+      )
+    : DEFAULT_SCHEDULE_START_MINUTES;
 
   if (
     Number.isNaN(totalMinutes) ||
-    totalMinutes < SCHEDULE_START_MINUTES ||
-    totalMinutes > SCHEDULE_END_MINUTES
+    Number.isNaN(scheduleEndMinutes) ||
+    !isMinutesWithinWindow(totalMinutes, windowStartMinutes, scheduleEndMinutes)
   ) {
     return ["OUT_OF_SCHEDULE"];
   }
 
   return null;
+};
+
+const parseSqlTimeToMinutes = (value: string): number => {
+  const [hour = "0", minute = "0"] = value.split(":");
+  return Number(hour) * 60 + Number(minute);
+};
+
+const normalizeMinutes = (value: number): number => {
+  const normalized = value % 1440;
+  return normalized < 0 ? normalized + 1440 : normalized;
+};
+
+const isMinutesWithinWindow = (
+  value: number,
+  windowStart: number,
+  windowEnd: number,
+): boolean => {
+  const normalizedValue = normalizeMinutes(value);
+  const normalizedStart = normalizeMinutes(windowStart);
+  const normalizedEnd = normalizeMinutes(windowEnd);
+
+  if (normalizedStart <= normalizedEnd) {
+    return (
+      normalizedValue >= normalizedStart && normalizedValue <= normalizedEnd
+    );
+  }
+
+  return normalizedValue >= normalizedStart || normalizedValue <= normalizedEnd;
+};
+
+const calculateSegmentWorkedMinutes = (
+  startMinutes: number,
+  endMinutes: number,
+): number => {
+  if (endMinutes >= startMinutes) {
+    return endMinutes - startMinutes;
+  }
+
+  return 1440 - startMinutes + endMinutes;
+};
+
+const resolveShiftSegments = (
+  shift: TimeControlShift,
+): ResolvedShiftSegment[] => {
+  return shift.segments
+    .slice()
+    .sort((left, right) => left.segmentOrder - right.segmentOrder)
+    .map((segment) => {
+      const startMinutes = parseSqlTimeToMinutes(segment.startTime);
+      const endMinutes = parseSqlTimeToMinutes(segment.endTime);
+      return {
+        id: segment.id,
+        shiftId: shift.id,
+        shiftName: shift.name,
+        segmentOrder: segment.segmentOrder,
+        startMinutes,
+        endMinutes,
+        toleranceStartMinutes: segment.toleranceStartMinutes,
+        toleranceEndMinutes: segment.toleranceEndMinutes,
+        expectedWorkedMinutes: calculateSegmentWorkedMinutes(
+          startMinutes,
+          endMinutes,
+        ),
+      };
+    });
+};
+
+const resolveShiftSegmentForDate = (
+  shift: TimeControlShift | null,
+  value: Date,
+): ResolvedShiftSegment | null => {
+  if (!shift || shift.segments.length === 0) {
+    return null;
+  }
+
+  const { hour, minute } = getDatePartsInTimeZone(value);
+  const totalMinutes = Number(hour) * 60 + Number(minute);
+
+  return (
+    resolveShiftSegments(shift).find((segment) =>
+      isMinutesWithinWindow(
+        totalMinutes,
+        segment.startMinutes - segment.toleranceStartMinutes,
+        segment.startMinutes + segment.toleranceEndMinutes,
+      ),
+    ) ?? null
+  );
+};
+
+const resolveShiftSegmentForRecord = (
+  shift: TimeControlShift | null,
+  checkInAt: string,
+): ResolvedShiftSegment | null => {
+  if (!shift || shift.segments.length === 0) {
+    return null;
+  }
+
+  const [, timePart = "00:00:00.000"] = checkInAt.split(" ");
+  const [rawTime] = timePart.split(".");
+  const totalMinutes = parseSqlTimeToMinutes(rawTime);
+
+  return (
+    resolveShiftSegments(shift).find((segment) =>
+      isMinutesWithinWindow(
+        totalMinutes,
+        segment.startMinutes - segment.toleranceStartMinutes,
+        segment.startMinutes + segment.toleranceEndMinutes,
+      ),
+    ) ?? null
+  );
 };
 
 const toRadians = (value: number): number => (value * Math.PI) / 180;
@@ -387,6 +540,7 @@ export class TimeControlService implements WorkdayRecordsService {
     private readonly repository: WorkdayRecordsRepository = createWorkdayRecordsRepository(),
     private readonly directoryRepository = createDirectoryRepository(),
     private readonly allowedLocationsService = createTimeControlAllowedLocationsService(),
+    private readonly shiftsService = createTimeControlShiftsService(),
     private readonly trustedNetworksService = createTimeControlTrustedNetworksService(),
   ) {}
 
@@ -473,8 +627,12 @@ export class TimeControlService implements WorkdayRecordsService {
     const hasOutsideAllowedLocationOnMobile =
       normalizedDeviceType === "MOBILE" &&
       hasLocationOutsideAllowedPoint(rawLocationIncidentFlags);
+    const assignedShift = await this.shiftsService.findAssignedShiftByUserId(
+      user.userId,
+    );
+    const resolvedSegment = resolveShiftSegmentForDate(assignedShift, now);
     const incidentFlags = mergeIncidentFlags(
-      buildCheckInIncidentFlags(now),
+      buildCheckInIncidentFlags(now, assignedShift ? resolvedSegment : undefined),
       normalizeLocationIncidentFlags(
         normalizedDeviceType,
         rawLocationIncidentFlags,
@@ -553,6 +711,13 @@ export class TimeControlService implements WorkdayRecordsService {
       throw new Error("La hora de salida debe ser posterior a la hora de entrada.");
     }
 
+    const assignedShift = await this.shiftsService.findAssignedShiftByUserId(
+      user.userId,
+    );
+    const resolvedSegment = resolveShiftSegmentForRecord(
+      assignedShift,
+      openRecord.checkInAt,
+    );
     const allowedLocations = await this.getAllowedLocations();
     const rawLocationIncidentFlags = buildLocationIncidentFlags(
       location,
@@ -563,7 +728,10 @@ export class TimeControlService implements WorkdayRecordsService {
       hasLocationOutsideAllowedPoint(rawLocationIncidentFlags);
     const incidentFlags = mergeIncidentFlags(
       openRecord.incidentFlags,
-      buildIncidentFlags(workedMinutes),
+      buildIncidentFlags(
+        workedMinutes,
+        resolvedSegment?.expectedWorkedMinutes ?? DEFAULT_EXPECTED_WORKDAY_MINUTES,
+      ),
       normalizeLocationIncidentFlags(
         normalizedDeviceType,
         rawLocationIncidentFlags,
@@ -579,7 +747,10 @@ export class TimeControlService implements WorkdayRecordsService {
       openRecord.adminValidationReason === "OUTSIDE_ALLOWED_LOCATION" ||
         hasOutsideAllowedLocationOnMobile,
     );
-    const overtimeMinutes = calculateOvertimeMinutes(workedMinutes);
+    const overtimeMinutes = calculateOvertimeMinutes(
+      workedMinutes,
+      resolvedSegment?.expectedWorkedMinutes ?? DEFAULT_EXPECTED_WORKDAY_MINUTES,
+    );
     const input: CloseCheckOutInput = {
       recordId: openRecord.id,
       checkOutAt,

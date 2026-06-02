@@ -35,9 +35,23 @@ const formatMenuUserName = (userSession?: UserSession | null): string => {
     .join(" ");
 };
 
+
+// 2. Reemplaza tu isActivePath actual (Línea 40-43) por el motor de exclusión
 const isActivePath = (href: string): boolean => {
-  if (href === "/control-horario") return pathname === "/control-horario";
-  return pathname.startsWith(href);
+  const currentPathWithSearch = pathname + Astro.url.search;
+  
+  if (currentPathWithSearch === href) return true;
+
+  const [baseHref, hrefSearch] = href.split('?');
+  
+  if (hrefSearch) return false;
+
+  if (baseHref === '/control-horario' && pathname.startsWith('/control-horario/gestion')) return false;
+  if (baseHref === '/vacaciones' && pathname.startsWith('/admin/vacaciones')) return false;
+  if (baseHref === '/proyectos' && (pathname.startsWith('/admin/proyectos') || pathname.startsWith('/templa/'))) return false;
+
+  if (pathname === baseHref) return true;
+  return pathname.startsWith(`${baseHref}/`);
 };
 
 const getSidebarLinkClass = (isActive: boolean): string =>
@@ -61,7 +75,6 @@ const coordinatorDepartments = currentUser
 
 const canAccessTimeControlManagement =
   session?.role === "Admin" || session?.role === "Responsable" || session?.canManageTimeControlRequests;
-
 const navItems = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Proyectos", href: "/proyectos" },
@@ -82,6 +95,19 @@ const visibleNavItems =
     ? navItems.filter((item) => item.href !== "/vacaciones-departamento")
     : navItems;
 
+const adminGeneralNavItems = [
+  { label: "Inicio", href: "/dashboard" },
+  { label: "Proyectos", href: "/proyectos" },
+  { label: "Vacaciones", href: "/vacaciones" },
+  { label: "Horas", href: "/horas" },
+  { label: "Mi control horario", href: "/control-horario" },
+  ...(isCaffEngineeringWorker
+    ? [{ label: "Horas CAFF", href: "/horas-caff" }]
+    : []),
+  { label: "Reporting", href: "/reporting" },
+  { label: "Calendario", href: "/admin/calendario" },
+];
+
 const timeControlItemHrefs = new Set(["/control-horario/gestion"]);
 
 const generalNavItems = visibleNavItems.filter(
@@ -94,27 +120,55 @@ const timeControlSectionItems = visibleNavItems.filter((item) =>
   session?.role !== "Admin",
 );
 
-const adminItems = [
-  { label: "Usuarios", href: "/admin/usuarios" },
-  { label: "Configuraci\u00f3n", href: "/admin/configuracion" },
-  { label: "Vacaciones", href: "/admin/vacaciones" },
-  { label: "Calendario", href: "/admin/calendario" },
-  ...(canAccessTimeControlManagement
-    ? [{ label: "Gestion de control horario", href: "/control-horario/gestion" }]
-    : []),
-];
+// 1. Modifica adminSidebarSections para que las rutas sean únicas
+const adminSidebarSections = [
+  {
+    title: "", 
+    items: adminGeneralNavItems, 
+  },
+  {
+    title: "MÓDULO TRABAJADORES",
+    items: canAccessTimeControlManagement
+      ? [{ label: "Control de Trabajadores", href: "/control-horario/gestion" }] 
+      : [],
+  },
+  {
+    title: "ADMINISTRACIÓN",
+    items: [
+      // Transformación: Asignar ruta única de administración
+      { label: "Gestión de Proyectos", href: "/admin/proyectos" }, 
+    ],
+  },
+  {
+    title: "MÓDULO VACACIONES",
+    items: [
+      { label: "Control de Vacaciones", href: "/admin/vacaciones" } 
+    ],
+  },
+  // ... resto del bloque sin cambios
+].filter((section) => section.items.length > 0);
+
+const visibleAdminSidebarSections = adminSidebarSections
+  .map((section) => ({
+    ...section,
+    items: section.items.filter((item) => item.href !== "/admin/proyectos"),
+  }))
+  .filter((section) => section.items.length > 0);
 
 const coordinatorSections = coordinatorDepartments.map((department) => ({
-  title: department.name,
+  // 1. Pasamos el nombre a mayúsculas para que tenga el mismo peso visual que "ADMINISTRACIÓN" o "TEMPLA"
+  title: department.name.toUpperCase(),
   items: [
     {
+      // Este ya clava el estilo "Vacaciones de Administración" que le gusta a tu tutor, pero por departamento
       label: `Vacaciones de ${department.name}`,
       href: `/vacaciones-departamento?departmentId=${department.id}`,
     },
     ...(canAccessTimeControlManagement
       ? [
           {
-            label: "Gestion de control horario",
+            // 2. Cambiamos el nombre por el término simplificado del diseño oscuro
+            label: "Control de Trabajadores",
             href: "/control-horario/gestion",
           },
         ]
@@ -179,6 +233,24 @@ const coordinatorNavSections = coordinatorSections;
             </div>
 
             <div class="flex-1 overflow-y-auto py-4 px-3 custom-scrollbar">
+              {session?.role === "Admin" ? (
+                visibleAdminSidebarSections.map((section, index) => (
+                  <nav class:list={["space-y-1", index > 0 && "mt-6"]}>
+                    <p class="px-3 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">
+                      {section.title}
+                    </p>
+                    {section.items.map((item) => (
+                      <a
+                        href={item.href}
+                        class={getSidebarLinkClass(isActivePath(item.href))}
+                      >
+                        {item.label}
+                      </a>
+                    ))}
+                  </nav>
+                ))
+              ) : (
+                <>
               <nav class="space-y-1">
                  <p class="px-3 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">General</p>
                  {generalNavItems.map((item) => (
@@ -219,18 +291,8 @@ const coordinatorNavSections = coordinatorSections;
                 </nav>
               ))}
 
-              {session?.role === "Admin" && (
-                <nav class="mt-6 space-y-1">
-                  <p class="px-3 mb-2 text-[10px] font-bold text-slate-400 uppercase tracking-widest">Administración</p>
-                  {adminItems.map((item) => (
-                    <a
-                      href={item.href}
-                      class={getSidebarLinkClass(isActivePath(item.href))}
-                    >
-                      {item.label}
-                    </a>
-                  ))}
-                </nav>
+
+                </>
               )}
             </div>
 

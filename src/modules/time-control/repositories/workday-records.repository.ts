@@ -130,7 +130,7 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
         check_out_user_agent, check_in_device_reason, check_out_device_reason,
         requires_admin_validation, admin_validation_reason, admin_validation_status,
         admin_validated_by, admin_validated_at, admin_validation_comment, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, NULL, ?, NULL, ?, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, NULL, ?, NULL, ?, NULL, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
       [
         input.id,
         input.userId,

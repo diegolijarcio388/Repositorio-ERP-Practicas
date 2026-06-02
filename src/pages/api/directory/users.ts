@@ -39,6 +39,7 @@ export const POST: APIRoute = withApiError(async (context) => {
     role,
     canManageTimeControlRequests,
     timeControlDevicePolicy,
+    timeControlShiftId,
     canManageVacations,
     canManageProjects,
   } = body;
@@ -62,6 +63,10 @@ export const POST: APIRoute = withApiError(async (context) => {
       timeControlDevicePolicy === "TABLET_OR_MOBILE"
         ? timeControlDevicePolicy
         : "TABLET_ONLY",
+    timeControlShiftId:
+      typeof timeControlShiftId === "string" && timeControlShiftId.trim()
+        ? timeControlShiftId.trim()
+        : null,
     canManageVacations: Boolean(canManageVacations),
     canManageProjects: Boolean(canManageProjects),
   });

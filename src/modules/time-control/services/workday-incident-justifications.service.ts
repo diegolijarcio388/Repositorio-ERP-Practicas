@@ -143,7 +143,14 @@ export class WorkdayIncidentJustificationsServiceImpl
       throw new Error("No se encontró la justificación indicada.");
     }
 
-    if (justification.status !== "APPROVED") {
+    const wasReviewedByAdmin =
+      Boolean(justification.reviewedByAdminId) ||
+      Boolean(justification.adminComment);
+
+    if (
+      !wasReviewedByAdmin ||
+      !["APPROVED", "REJECTED"].includes(justification.status)
+    ) {
       throw new Error(
         "Solo se pueden eliminar justificaciones que ya estén aprobadas.",
       );

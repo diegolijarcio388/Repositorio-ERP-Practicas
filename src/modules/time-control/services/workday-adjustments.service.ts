@@ -66,6 +66,11 @@ export interface WorkdayAdjustmentsService {
     user: AuthenticatedApiUser,
   ): Promise<WorkdayAdjustmentRequest[]>;
 
+  deleteMyRequest(
+    user: AuthenticatedApiUser,
+    requestId: string,
+  ): Promise<void>;
+
   createRequest(
     user: AuthenticatedApiUser,
     input: CreateAdjustmentRequestInput,
@@ -112,7 +117,32 @@ export class WorkdayAdjustmentsServiceImpl
   async getMyRequests(
     user: AuthenticatedApiUser,
   ): Promise<WorkdayAdjustmentRequest[]> {
-    return this.repository.listFiltered({ userId: user.userId });
+    return this.repository.listFiltered({
+      userId: user.userId,
+      excludeHiddenByWorker: true,
+    });
+  }
+
+  async deleteMyRequest(
+    user: AuthenticatedApiUser,
+    requestId: string,
+  ): Promise<void> {
+    const request = await this.repository.findById(requestId);
+
+    if (!request || request.userId !== user.userId) {
+      throw new Error("No se encontró la solicitud indicada.");
+    }
+
+    const wasReviewedByAdmin =
+      Boolean(request.reviewedByAdminId) || Boolean(request.adminComment);
+
+    if (!wasReviewedByAdmin || !["APPROVED", "REJECTED"].includes(request.status)) {
+      throw new Error(
+        "Solo se pueden eliminar solicitudes ya respondidas por administración.",
+      );
+    }
+
+    await this.repository.hideForWorker(request.id, nowSqlDateTime());
   }
 
   async createRequest(
@@ -156,6 +186,7 @@ export class WorkdayAdjustmentsServiceImpl
       adminComment: null,
       reviewedByCoordinatorId: null,
       reviewedByAdminId: null,
+      hiddenByWorkerAt: null,
       createdAt: nowDateTime,
       updatedAt: nowDateTime,
     };

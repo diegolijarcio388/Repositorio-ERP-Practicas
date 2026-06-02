@@ -16,7 +16,7 @@ interface DbWorkdayIncidentJustificationRow {
   admin_comment: string | null;
   reviewed_by_coordinator_id: string | null;
   reviewed_by_admin_id: string | null;
-  hidden_by_worker_at: string | null;
+  hidden_by_worker_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -33,10 +33,15 @@ const mapRow = (
   adminComment: row.admin_comment,
   reviewedByCoordinatorId: row.reviewed_by_coordinator_id,
   reviewedByAdminId: row.reviewed_by_admin_id,
-  hiddenByWorkerAt: row.hidden_by_worker_at,
+  hiddenByWorkerAt: row.hidden_by_worker_at ?? null,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
+
+const isMissingHiddenByWorkerColumnError = (error: unknown): boolean =>
+  error instanceof Error &&
+  error.message.includes("Unknown column") &&
+  error.message.includes("hidden_by_worker_at");
 
 export interface WorkdayIncidentJustificationsRepository {
   create(
@@ -66,27 +71,54 @@ class MySqlWorkdayIncidentJustificationsRepository
   async create(
     input: CreateWorkdayIncidentJustificationInput,
   ): Promise<WorkdayIncidentJustification> {
-    await getMySqlPool().query(
-      `INSERT INTO workday_incident_justifications (
-        id, record_id, user_id, reason, status, coordinator_comment,
-        admin_comment, reviewed_by_coordinator_id, reviewed_by_admin_id, hidden_by_worker_at,
-        created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      [
-        input.id,
-        input.recordId,
-        input.userId,
-        input.reason,
-        input.status,
-        input.coordinatorComment,
-        input.adminComment,
-        input.reviewedByCoordinatorId,
-        input.reviewedByAdminId,
-        input.hiddenByWorkerAt,
-        input.createdAt,
-        input.updatedAt,
-      ],
-    );
+    try {
+      await getMySqlPool().query(
+        `INSERT INTO workday_incident_justifications (
+          id, record_id, user_id, reason, status, coordinator_comment,
+          admin_comment, reviewed_by_coordinator_id, reviewed_by_admin_id, hidden_by_worker_at,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.id,
+          input.recordId,
+          input.userId,
+          input.reason,
+          input.status,
+          input.coordinatorComment,
+          input.adminComment,
+          input.reviewedByCoordinatorId,
+          input.reviewedByAdminId,
+          input.hiddenByWorkerAt,
+          input.createdAt,
+          input.updatedAt,
+        ],
+      );
+    } catch (error) {
+      if (!isMissingHiddenByWorkerColumnError(error)) {
+        throw error;
+      }
+
+      await getMySqlPool().query(
+        `INSERT INTO workday_incident_justifications (
+          id, record_id, user_id, reason, status, coordinator_comment,
+          admin_comment, reviewed_by_coordinator_id, reviewed_by_admin_id,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          input.id,
+          input.recordId,
+          input.userId,
+          input.reason,
+          input.status,
+          input.coordinatorComment,
+          input.adminComment,
+          input.reviewedByCoordinatorId,
+          input.reviewedByAdminId,
+          input.createdAt,
+          input.updatedAt,
+        ],
+      );
+    }
 
     const created = await this.findById(input.id);
     if (!created) {
@@ -97,14 +129,8 @@ class MySqlWorkdayIncidentJustificationsRepository
   }
 
   async findById(id: string): Promise<WorkdayIncidentJustification | null> {
-    const [rows] = await getMySqlPool().query<
-      DbWorkdayIncidentJustificationRow[]
-    >(
-      `SELECT id, record_id, user_id, reason, status, coordinator_comment,
-              admin_comment, reviewed_by_coordinator_id, reviewed_by_admin_id, hidden_by_worker_at,
-              created_at, updated_at
-       FROM workday_incident_justifications
-       WHERE id = ?
+    const rows = await this.runSelect(
+      `WHERE id = ?
        LIMIT 1`,
       [id],
     );
@@ -115,14 +141,8 @@ class MySqlWorkdayIncidentJustificationsRepository
   async findByRecordId(
     recordId: string,
   ): Promise<WorkdayIncidentJustification | null> {
-    const [rows] = await getMySqlPool().query<
-      DbWorkdayIncidentJustificationRow[]
-    >(
-      `SELECT id, record_id, user_id, reason, status, coordinator_comment,
-              admin_comment, reviewed_by_coordinator_id, reviewed_by_admin_id, hidden_by_worker_at,
-              created_at, updated_at
-       FROM workday_incident_justifications
-       WHERE record_id = ?
+    const rows = await this.runSelect(
+      `WHERE record_id = ?
        LIMIT 1`,
       [recordId],
     );
@@ -168,20 +188,11 @@ class MySqlWorkdayIncidentJustificationsRepository
       values.push(...filters.statuses);
     }
 
-    if (filters.excludeHiddenByWorker) {
-      conditions.push("hidden_by_worker_at IS NULL");
-    }
-
-    const [rows] = await getMySqlPool().query<
-      DbWorkdayIncidentJustificationRow[]
-    >(
-      `SELECT id, record_id, user_id, reason, status, coordinator_comment,
-              admin_comment, reviewed_by_coordinator_id, reviewed_by_admin_id, hidden_by_worker_at,
-              created_at, updated_at
-       FROM workday_incident_justifications
-       WHERE ${conditions.join(" AND ")}
+    const rows = await this.runSelect(
+      `WHERE ${conditions.join(" AND ")}
        ORDER BY created_at DESC`,
       values,
+      filters.excludeHiddenByWorker ?? false,
     );
 
     return rows.map(mapRow);
@@ -219,13 +230,75 @@ class MySqlWorkdayIncidentJustificationsRepository
   }
 
   async hideForWorker(id: string, hiddenAt: string): Promise<void> {
-    await getMySqlPool().query(
-      `UPDATE workday_incident_justifications
-       SET hidden_by_worker_at = ?,
-           updated_at = ?
-       WHERE id = ?`,
-      [hiddenAt, hiddenAt, id],
-    );
+    try {
+      await getMySqlPool().query(
+        `UPDATE workday_incident_justifications
+         SET hidden_by_worker_at = ?,
+             updated_at = ?
+         WHERE id = ?`,
+        [hiddenAt, hiddenAt, id],
+      );
+    } catch (error) {
+      if (isMissingHiddenByWorkerColumnError(error)) {
+        throw new Error(
+          "Hace falta aplicar la migración de ocultación de incidencias para poder quitarlas de la vista.",
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  private async runSelect(
+    suffix: string,
+    values: string[],
+    excludeHiddenByWorker = false,
+  ): Promise<DbWorkdayIncidentJustificationRow[]> {
+    const normalizedSuffix = suffix.trim();
+    const queryWithHiddenByWorker = `SELECT id, record_id, user_id, reason, status, coordinator_comment,
+                                            admin_comment, reviewed_by_coordinator_id, reviewed_by_admin_id, hidden_by_worker_at,
+                                            created_at, updated_at
+                                     FROM workday_incident_justifications
+                                     ${
+                                       excludeHiddenByWorker
+                                         ? normalizedSuffix.startsWith("WHERE")
+                                           ? normalizedSuffix.replace(
+                                               /^WHERE\s+/,
+                                               "WHERE hidden_by_worker_at IS NULL AND ",
+                                             )
+                                           : `WHERE hidden_by_worker_at IS NULL ${normalizedSuffix}`
+                                         : normalizedSuffix
+                                     }`;
+
+    try {
+      const [rows] = await getMySqlPool().query<DbWorkdayIncidentJustificationRow[]>(
+        queryWithHiddenByWorker,
+        values,
+      );
+      return rows;
+    } catch (error) {
+      if (!isMissingHiddenByWorkerColumnError(error)) {
+        throw error;
+      }
+
+      const legacySuffix =
+        excludeHiddenByWorker && normalizedSuffix.startsWith("WHERE")
+          ? normalizedSuffix.replace(
+              /hidden_by_worker_at IS NULL AND\s*/i,
+              "",
+            )
+          : normalizedSuffix.replace(/WHERE hidden_by_worker_at IS NULL\s*/i, "");
+      const queryWithoutHiddenByWorker = `SELECT id, record_id, user_id, reason, status, coordinator_comment,
+                                                 admin_comment, reviewed_by_coordinator_id, reviewed_by_admin_id,
+                                                 created_at, updated_at
+                                          FROM workday_incident_justifications
+                                          ${legacySuffix}`;
+      const [rows] = await getMySqlPool().query<DbWorkdayIncidentJustificationRow[]>(
+        queryWithoutHiddenByWorker,
+        values,
+      );
+      return rows;
+    }
   }
 }
 

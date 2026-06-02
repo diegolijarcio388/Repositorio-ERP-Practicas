@@ -103,6 +103,7 @@ export interface WorkdayAdjustmentRequest {
   adminComment: string | null;
   reviewedByCoordinatorId: string | null;
   reviewedByAdminId: string | null;
+  hiddenByWorkerAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -205,6 +206,7 @@ export interface WorkdayAdjustmentRequestFilters {
   userIds?: string[];
   status?: AdjustmentRequestStatus;
   statuses?: AdjustmentRequestStatus[];
+  excludeHiddenByWorker?: boolean;
 }
 
 export interface ReviewWorkdayAdjustmentRequestInput {
@@ -331,4 +333,27 @@ export interface ReviewWorkdayAdminValidationInput {
   adminValidatedAt: string;
   adminValidationComment: string | null;
   updatedAt: string;
+}
+
+export interface TimeControlShiftSegment {
+  id: string;
+  shiftId: string;
+  segmentOrder: number;
+  startTime: string;
+  endTime: string;
+  toleranceStartMinutes: number;
+  toleranceEndMinutes: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TimeControlShift {
+  id: string;
+  name: string;
+  description: string | null;
+  isActive: boolean;
+  allowsOvernight: boolean;
+  createdAt: string;
+  updatedAt: string;
+  segments: TimeControlShiftSegment[];
 }

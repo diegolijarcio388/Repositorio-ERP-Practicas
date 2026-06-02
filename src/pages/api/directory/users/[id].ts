@@ -20,6 +20,7 @@ export const PUT: APIRoute = withApiError(async (context) => {
     role,
     canManageTimeControlRequests,
     timeControlDevicePolicy,
+    timeControlShiftId,
     canManageVacations,
     canManageProjects,
   } = body;
@@ -45,6 +46,12 @@ export const PUT: APIRoute = withApiError(async (context) => {
             timeControlDevicePolicy === "TABLET_OR_MOBILE"
           ? timeControlDevicePolicy
           : "TABLET_ONLY",
+    timeControlShiftId:
+      timeControlShiftId === undefined
+        ? undefined
+        : typeof timeControlShiftId === "string" && timeControlShiftId.trim()
+          ? timeControlShiftId.trim()
+          : null,
     canManageVacations:
       canManageVacations !== undefined ? Boolean(canManageVacations) : undefined,
     canManageProjects:
