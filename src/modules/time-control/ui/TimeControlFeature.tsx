@@ -25,9 +25,9 @@ type DisplayWorkdayTrustLevel = "CORRECT" | "REVIEW";
 
 const STATUS_LABELS: Record<DisplayWorkdayStatus, string> = {
   OPEN: "Abierta",
-  COMPLETED: "Completado",
+  COMPLETED: "Cerrado",
   ABSENT: "Ausente",
-  INCIDENT: "Incidencia",
+  INCIDENT: "Cerrado",
 };
 
 
@@ -243,7 +243,7 @@ const isPendingAdminValidation = (record: WorkdayRecord): boolean =>
 const getDisplayStatus = (status: WorkdayStatus): DisplayWorkdayStatus => {
   if (status === "OPEN") return "OPEN";
   if (status === "COMPLETED") return "COMPLETED";
-  if (status === "INCIDENT") return "INCIDENT";
+  if (status === "INCIDENT") return "COMPLETED";
   return "ABSENT";
 };
 
@@ -416,7 +416,7 @@ const TRUST_LEVEL_LABELS: Record<DisplayWorkdayTrustLevel, string> = {
 
 const RECORD_STATE_LEGEND_ITEMS = [
   {
-    label: "Completado",
+    label: "Cerrado",
     borderClass: "border-emerald-500",
     dotClass: "bg-emerald-500",
     textClass: "text-emerald-700",
@@ -426,12 +426,6 @@ const RECORD_STATE_LEGEND_ITEMS = [
     borderClass: "border-amber-500",
     dotClass: "bg-amber-500",
     textClass: "text-amber-700",
-  },
-  {
-    label: "Incidencia",
-    borderClass: "border-rose-500",
-    dotClass: "bg-rose-500",
-    textClass: "text-rose-700",
   },
   {
     label: "Ausente",
@@ -474,13 +468,15 @@ const renderLegendChip = (item: {
 );
 
 const POPUP_NEUTRAL_BUTTON_CLASS =
-  "rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900";
+  "flex items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900";
 
 const POPUP_PRIMARY_BUTTON_CLASS =
-  "rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-slate-800";
+  "flex items-center justify-center gap-2 rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-slate-800";
 
 const POPUP_DANGER_BUTTON_CLASS =
-  "rounded-xl bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-rose-700";
+  "flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-rose-700";
+const OPEN_WORKDAY_WARNING_MINUTES = 8 * 60 + 15;
+const OPEN_WORKDAY_CRITICAL_MINUTES = 24 * 60;
 
 const DEVICE_TYPE_LABELS: Record<WorkdayDeviceType, string> = {
   MOBILE: "MÓVIL",
@@ -494,8 +490,21 @@ const getDeviceTypeLabel = (deviceType: WorkdayDeviceType | null): string =>
 
 const getDisplayTrustLevel = (
   record: WorkdayRecord,
-): DisplayWorkdayTrustLevel =>
-  (record.trustLevel ?? "MEDIA") === "ALTA" ? "CORRECT" : "REVIEW";
+): DisplayWorkdayTrustLevel => {
+  if (record.adminValidationStatus === "APPROVED") {
+    return "CORRECT";
+  }
+
+  if (
+    record.status === "INCIDENT" ||
+    Boolean(record.incidentFlags?.length) ||
+    isPendingAdminValidation(record)
+  ) {
+    return "REVIEW";
+  }
+
+  return (record.trustLevel ?? "MEDIA") === "ALTA" ? "CORRECT" : "REVIEW";
+};
 
 const hasAdminResponseForAdjustmentRequest = (
   request: WorkdayAdjustmentRequest,
@@ -559,7 +568,6 @@ interface ManagerTodayExclusionsState {
 
 type WorkerRequestsTab = "incidents" | "requests";
 type ManagerReviewTab = "requests" | "incidents" | "exclusions" | "records" | "tracker";
-type IncidentRangeFilter = "day" | "week";
 
 type ExclusionRequestType = "REMOTE_WORK" | "PERMISSION";
 type ExclusionRequestStatus =
@@ -625,6 +633,11 @@ const normalizeDateTimeLocalToSql = (value: string): string => {
     : `${normalized}.000`;
 };
 
+const sqlDateTimeToDateTimeLocal = (value?: string | null): string => {
+  if (!value) return "";
+  return value.replace(" ", "T").slice(0, 16);
+};
+
 const getMinutesFromTimeValue = (value?: string | null): number | null => {
   if (!value) return null;
   const [hours, minutes] = value.split(":").map(Number);
@@ -634,6 +647,12 @@ const getMinutesFromTimeValue = (value?: string | null): number | null => {
 
 const getMinutesFromSqlDateTime = (value?: string | null): number | null =>
   getMinutesFromTimeValue(getTimeOnlyFromSqlDateTime(value));
+
+const getOpenWorkdayMinutes = (record: WorkdayRecord): number => {
+  const startTime = new Date(record.checkInAt.replace(" ", "T")).getTime();
+  if (!Number.isFinite(startTime)) return 0;
+  return Math.max(0, Math.floor((Date.now() - startTime) / 60000));
+};
 
 const getStartOfWeekSqlDate = (sqlDate: string): string => {
   const date = new Date(`${sqlDate}T12:00:00`);
@@ -782,6 +801,10 @@ const getStatusDetail = (record: WorkdayRecord): string => {
     return "Falta fichaje de salida";
   }
 
+  if (record.status === "OPEN") {
+    return "Salida pendiente";
+  }
+
   if (record.status !== "INCIDENT") {
     if (record.incidentFlags?.includes("OUT_OF_SCHEDULE")) {
       return "Fichaje fuera del rango horario permitido.";
@@ -796,7 +819,7 @@ const getStatusDetail = (record: WorkdayRecord): string => {
   }
 
   if (!record.incidentFlags?.length) {
-    return "Incidencia detectada sin detalle adicional.";
+    return "Registro para revisar sin detalle adicional.";
   }
 
   const messages = record.incidentFlags.map(getIncidentFlagMessage);
@@ -827,6 +850,22 @@ const getStatusDetailItems = (record: WorkdayRecord): string[] => {
 
   return Array.from(new Set(items));
 };
+
+const getStatusDetailItemClass = (record: WorkdayRecord): string =>
+  record.status === "OPEN"
+    ? "border-amber-500 bg-transparent text-amber-700"
+    : "border-sky-200 bg-sky-50 text-sky-700";
+
+const getStatusDetailItemOnWhiteClass = (record: WorkdayRecord): string =>
+  record.status === "OPEN"
+    ? "border-amber-500 text-amber-700"
+    : "border-sky-200 text-sky-700";
+
+const shouldRenderStatusDetailItems = (record: WorkdayRecord): boolean =>
+  record.status !== "COMPLETED" ||
+  Boolean(record.incidentFlags?.length) ||
+  record.requiresAdminValidation ||
+  Boolean(record.adminValidationReason);
 
 const JUSTIFIABLE_INCIDENT_FLAGS: IncidentFlag[] = [
   "DURATION_TOO_SHORT",
@@ -982,6 +1021,12 @@ export function TimeControlFeature({
   const [trackerCalendarMonth, setTrackerCalendarMonth] = useState<string>(
     getTodaySqlDate().slice(0, 7),
   );
+  const [reviewModalMonth, setReviewModalMonth] = useState<string>(
+    getTodaySqlDate().slice(0, 7),
+  );
+  const [reviewModalSelectedDate, setReviewModalSelectedDate] = useState<
+    string | null
+  >(null);
 const [filterValidationStatus, setFilterValidationStatus] = useState<string>("ALL");  const [managerUserFilter, setManagerUserFilter] = useState("");
   const [managerUserSearch, setManagerUserSearch] = useState("");
   const [managerDateFrom, setManagerDateFrom] = useState("");
@@ -1019,8 +1064,6 @@ const [filterValidationStatus, setFilterValidationStatus] = useState<string>("AL
   const [incidentRecordTrustFilter, setIncidentRecordTrustFilter] = useState<
     "" | DisplayWorkdayTrustLevel
   >("");
-  const [incidentRangeFilter, setIncidentRangeFilter] =
-    useState<IncidentRangeFilter>("day");
 
   const clearRequestFilters = () => {
     setRequestsDateFrom("");
@@ -1047,7 +1090,6 @@ const [filterValidationStatus, setFilterValidationStatus] = useState<string>("AL
     setIncidentRecordDateFrom("");
     setIncidentRecordDateTo("");
     setIncidentRecordTrustFilter("");
-    setIncidentRangeFilter("day");
   };
   const openManagerRecordDetail = (record: WorkdayRecord) => {
     setSelectedDetailUserId(record.userId);
@@ -1073,6 +1115,18 @@ const [filterValidationStatus, setFilterValidationStatus] = useState<string>("AL
     useState<ManagerReviewTab>("records");
   const [selectedRecordForDetail, setSelectedRecordForDetail] =
     useState<WorkdayRecord | null>(null);
+  const [adminCloseRecord, setAdminCloseRecord] =
+    useState<WorkdayRecord | null>(null);
+  const [adminCloseReturnRecord, setAdminCloseReturnRecord] =
+    useState<WorkdayRecord | null>(null);
+  const [adminCloseCheckOutAt, setAdminCloseCheckOutAt] = useState("");
+  const [adminCloseComment, setAdminCloseComment] = useState("");
+  const [adminCloseSubmitting, setAdminCloseSubmitting] = useState(false);
+  const [openWorkdayWarning, setOpenWorkdayWarning] = useState<{
+    record: WorkdayRecord;
+    level: "warning" | "critical";
+    minutesOpen: number;
+  } | null>(null);
   const [selectedIncidentRecordId, setSelectedIncidentRecordId] = useState<
     string | null
   >(null);
@@ -1247,7 +1301,7 @@ const filteredRecords = useMemo(() => {
             );
 
             // CASO A: Si tras la limpieza no queda ninguna bandera de tiempo,
-            // significa que era una incidencia puramente de GPS/Dispositivo. La descartamos (null).
+            // significa que era una anomalía puramente de GPS/Dispositivo. La descartamos (null).
             if (timeFlags.length === 0) {
               return null;
             }
@@ -1578,26 +1632,9 @@ const filteredRecords = useMemo(() => {
       }),
     [isCoordinatorManagerView, filteredRecords],
   );
-  const incidentWeekRange = useMemo(
-    () => ({
-      from: getStartOfWeekSqlDate(trackerDate),
-      to: getEndOfWeekSqlDate(trackerDate),
-    }),
-    [trackerDate],
-  );
   const filteredManagerIncidentRecords = useMemo(
     () =>
       managerIncidentRecords.filter((record) => {
-        const matchesBaseRange =
-          incidentRangeFilter === "week"
-            ? record.workDate >= incidentWeekRange.from &&
-              record.workDate <= incidentWeekRange.to
-            : record.workDate === trackerDate;
-
-        if (!matchesBaseRange) {
-          return false;
-        }
-
         if (
           incidentRecordStatusFilter &&
           record.status !== incidentRecordStatusFilter
@@ -1643,17 +1680,13 @@ const filteredRecords = useMemo(() => {
         return true;
       }),
     [
-      incidentRangeFilter,
       incidentRecordDateFrom,
       incidentRecordDateTo,
       incidentRecordStatusFilter,
       incidentRecordTrustFilter,
       incidentRecordUserFilter,
-      incidentWeekRange.from,
-      incidentWeekRange.to,
       normalizedIncidentRecordUserSearch,
       managerIncidentRecords,
-      trackerDate,
     ],
   );
   const managerIncidentUsersCount = useMemo(
@@ -1724,21 +1757,78 @@ const filteredRecords = useMemo(() => {
 
     return weeks;
   }, [trackerCalendarMonth]);
-  const modalManagerIncidentRecords = useMemo(
-      () =>
-        managerIncidentRecords.filter((record) =>
-        incidentRangeFilter === "week"
-          ? record.workDate >= incidentWeekRange.from &&
-            record.workDate <= incidentWeekRange.to
-          : record.workDate === trackerDate,
+  const reviewModalRecordCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    filteredManagerIncidentRecords.forEach((record) => {
+      counts.set(record.workDate, (counts.get(record.workDate) ?? 0) + 1);
+    });
+
+    return counts;
+  }, [filteredManagerIncidentRecords]);
+  const reviewModalCalendarWeeks = useMemo<CalendarDayCell[][]>(() => {
+    const monthDays = getMonthDays(reviewModalMonth);
+    if (monthDays.length === 0) {
+      return [];
+    }
+
+    const firstDate = monthDays[0];
+    const firstDay = new Date(
+      Date.UTC(
+        Number(firstDate.slice(0, 4)),
+        Number(firstDate.slice(5, 7)) - 1,
+        Number(firstDate.slice(8, 10)),
       ),
-    [
-      incidentRangeFilter,
-      incidentWeekRange.from,
-      incidentWeekRange.to,
-      managerIncidentRecords,
-      trackerDate,
-    ],
+    );
+    const firstDayOffset = (firstDay.getUTCDay() + 6) % 7;
+    const today = getTodaySqlDate();
+    const cells: CalendarDayCell[] = [];
+
+    for (let index = 0; index < firstDayOffset; index += 1) {
+      cells.push({
+        workDate: null,
+        dayNumber: null,
+        isWeekend: false,
+        isToday: false,
+        records: [],
+      });
+    }
+
+    for (const workDate of monthDays) {
+      cells.push({
+        workDate,
+        dayNumber: Number(workDate.slice(-2)),
+        isWeekend: isWeekend(workDate),
+        isToday: workDate === today,
+        records: [],
+      });
+    }
+
+    while (cells.length % 7 !== 0) {
+      cells.push({
+        workDate: null,
+        dayNumber: null,
+        isWeekend: false,
+        isToday: false,
+        records: [],
+      });
+    }
+
+    const weeks: CalendarDayCell[][] = [];
+    for (let index = 0; index < cells.length; index += 7) {
+      weeks.push(cells.slice(index, index + 7));
+    }
+
+    return weeks;
+  }, [reviewModalMonth]);
+  const modalManagerIncidentRecords = useMemo(
+    () =>
+      reviewModalSelectedDate
+        ? filteredManagerIncidentRecords.filter(
+            (record) => record.workDate === reviewModalSelectedDate,
+          )
+        : filteredManagerIncidentRecords,
+    [filteredManagerIncidentRecords, reviewModalSelectedDate],
   );
   const todaySqlDate = getTodaySqlDate();
 
@@ -1995,7 +2085,7 @@ const filteredRecords = useMemo(() => {
     return justifiableIncidentRecords.filter((record) => {
       if (requestsDateFrom && record.workDate < requestsDateFrom) return false;
       if (requestsDateTo && record.workDate > requestsDateTo) return false;
-      // Las incidencias por justificar del trabajador no tienen estado de solicitud per se hasta que se envían
+      // Las anomalías por justificar del trabajador no tienen estado de solicitud per se hasta que se envían
       return true;
     });
   }, [justifiableIncidentRecords, requestsDateFrom, requestsDateTo]);
@@ -2664,6 +2754,41 @@ const filteredRecords = useMemo(() => {
     setSelectedOverflowDate(null);
   }, [selectedMonth]);
 
+  useEffect(() => {
+    if (!isWorkerMode || !showWorkerOverview || !openRecord) {
+      setOpenWorkdayWarning(null);
+      return;
+    }
+
+    const minutesOpen = getOpenWorkdayMinutes(openRecord);
+    const level =
+      minutesOpen >= OPEN_WORKDAY_CRITICAL_MINUTES
+        ? "critical"
+        : minutesOpen >= OPEN_WORKDAY_WARNING_MINUTES
+          ? "warning"
+          : null;
+
+    if (!level) {
+      setOpenWorkdayWarning(null);
+      return;
+    }
+
+    const storageKey = `time-control:open-workday-warning:${openRecord.id}:${level}`;
+    try {
+      if (window.sessionStorage.getItem(storageKey)) {
+        return;
+      }
+    } catch {
+      // Si sessionStorage falla, seguimos mostrando el aviso una vez en memoria.
+    }
+
+    setOpenWorkdayWarning({
+      record: openRecord,
+      level,
+      minutesOpen,
+    });
+  }, [isWorkerMode, openRecord, showWorkerOverview]);
+
   const readApiErrorMessage = async (
     response: Response,
     fallbackMessage: string,
@@ -2730,6 +2855,27 @@ const filteredRecords = useMemo(() => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const postponeOpenWorkdayWarning = () => {
+    if (openWorkdayWarning) {
+      const storageKey = `time-control:open-workday-warning:${openWorkdayWarning.record.id}:${openWorkdayWarning.level}`;
+      try {
+        window.sessionStorage.setItem(storageKey, "1");
+      } catch {
+        // No bloqueamos el cierre del aviso si el almacenamiento no está disponible.
+      }
+    }
+
+    setOpenWorkdayWarning(null);
+  };
+
+  const closeOpenWorkdayFromWarning = async () => {
+    postponeOpenWorkdayWarning();
+    await submitAction(
+      "/api/time-control/check-out",
+      "Salida registrada correctamente.",
+    );
   };
 
   const scrollToSection = (ref: { current: HTMLDivElement | null }) => {
@@ -3014,7 +3160,7 @@ const filteredRecords = useMemo(() => {
       const trimmedReason = incidentJustificationReason.trim();
       if (!trimmedReason) {
         throw new Error(
-          "Debes indicar un motivo para justificar la incidencia.",
+          "Debes indicar un motivo para justificar la anomalía.",
         );
       }
 
@@ -3039,7 +3185,7 @@ const filteredRecords = useMemo(() => {
 
       if (!response.ok) {
         throw new Error(
-          data.error ?? "No se pudo enviar la justificación de incidencia.",
+          data.error ?? "No se pudo enviar la justificación de la anomalía.",
         );
       }
 
@@ -3058,7 +3204,7 @@ const filteredRecords = useMemo(() => {
         message:
           error instanceof Error
             ? error.message
-            : "No se pudo enviar la justificación de incidencia.",
+            : "No se pudo enviar la justificación de la anomalía.",
       });
     } finally {
       setIncidentJustificationSubmitting(false);
@@ -3418,6 +3564,95 @@ const filteredRecords = useMemo(() => {
       });
     } finally {
       setReviewSubmittingId(null);
+    }
+  };
+
+  const openAdminCloseModal = (record: WorkdayRecord) => {
+    setAdminCloseRecord(record);
+    setAdminCloseReturnRecord(record);
+    setSelectedRecordForDetail(null);
+    setAdminCloseCheckOutAt(
+      sqlDateTimeToDateTimeLocal(record.checkOutAt ?? record.checkInAt),
+    );
+    setAdminCloseComment("");
+  };
+
+  const closeAdminCloseModal = () => {
+    setAdminCloseRecord(null);
+    setAdminCloseCheckOutAt("");
+    setAdminCloseComment("");
+    if (adminCloseReturnRecord) {
+      setSelectedRecordForDetail(adminCloseReturnRecord);
+      setAdminCloseReturnRecord(null);
+    }
+  };
+
+  const closeRecordAsAdmin = async () => {
+    if (!adminCloseRecord) {
+      return;
+    }
+
+    setAdminCloseSubmitting(true);
+    showLoadingPopup("Cerrando jornada...");
+
+    try {
+      const response = await fetch(
+        `/api/time-control/records/${adminCloseRecord.id}/admin-close`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            checkOutAt: normalizeDateTimeLocalToSql(adminCloseCheckOutAt),
+            comment: adminCloseComment.trim(),
+          }),
+        },
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          await readApiErrorMessage(
+            response,
+            "No se pudo cerrar la jornada.",
+          ),
+        );
+      }
+
+      const data = (await response.json()) as {
+        item?: WorkdayRecord;
+      };
+
+      let updatedRecord: WorkdayRecord | null = null;
+      if (data.item) {
+        updatedRecord = data.item;
+        applyUpdatedRecord(data.item);
+      }
+
+      await loadRecords();
+      hideLoadingPopup();
+      setAdminCloseRecord(null);
+      setAdminCloseCheckOutAt("");
+      setAdminCloseComment("");
+      setAdminCloseReturnRecord(null);
+      if (updatedRecord) {
+        setSelectedRecordForDetail(updatedRecord);
+      }
+      setToast({
+        tone: "success",
+        message: "Jornada cerrada correctamente.",
+      });
+    } catch (error) {
+      hideLoadingPopup();
+      setToast({
+        tone: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "No se pudo cerrar la jornada.",
+      });
+    } finally {
+      setAdminCloseSubmitting(false);
     }
   };
 
@@ -3789,7 +4024,44 @@ const filteredRecords = useMemo(() => {
               />
             </div>
           </div>
+
+          {isManagerMode && isFunctionalAdmin && record.status === "OPEN" ? (
+            <div className="mt-4 flex justify-end border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                className={`${POPUP_PRIMARY_BUTTON_CLASS} inline-flex items-center gap-2 text-xs`}
+                onClick={() => openAdminCloseModal(record)}
+              >
+                <i className="ti ti-lock-check text-[15px]" aria-hidden="true" />
+                Cerrar jornada
+              </button>
+            </div>
+          ) : null}
         </div>
+
+        {record.adminCloseComment || record.closedByAdminAt ? (
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm ring-1 ring-slate-200">
+                <i className="ti ti-lock-check text-[18px]" aria-hidden="true" />
+              </span>
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.16em] text-slate-400">
+                  Jornada cerrada por administración
+                </p>
+                {record.adminCloseComment ? (
+                  <p className="mt-1 text-sm leading-6 text-slate-700">
+                    {record.adminCloseComment}
+                  </p>
+                ) : (
+                  <p className="mt-1 text-sm leading-6 text-slate-500">
+                    Esta jornada fue cerrada manualmente por administración.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="space-y-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
@@ -3953,9 +4225,9 @@ const filteredRecords = useMemo(() => {
         </div>
 
         {hasIncident && (
-          <div className="flex items-start rounded-2xl border border-rose-100 bg-rose-50/40 p-4">
+          <div className="flex items-start rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
             <svg
-              className="mr-3 mt-0.5 h-5 w-5 shrink-0 text-rose-500"
+              className="mr-3 mt-0.5 h-5 w-5 shrink-0 text-sky-500"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -3968,12 +4240,19 @@ const filteredRecords = useMemo(() => {
               />
             </svg>
             <div>
-              <h6 className="text-xs font-bold uppercase tracking-wider text-rose-700">
-                Detalles de la incidencia
+              <h6 className="text-xs font-bold uppercase tracking-wider text-sky-700">
+                Motivos de revisión
               </h6>
-              <p className="mt-1 text-sm font-medium leading-relaxed text-rose-900">
-                {getStatusDetail(record)}
-              </p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {getStatusDetailItems(record).map((item) => (
+                  <span
+                    key={`${record.id}-detail-${item}`}
+                    className={`inline-flex rounded-full border bg-white px-3 py-1.5 text-xs font-semibold leading-5 shadow-sm ${getStatusDetailItemOnWhiteClass(record)}`}
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -4251,11 +4530,7 @@ const filteredRecords = useMemo(() => {
                             <div className="flex flex-wrap items-center gap-4 text-xs text-slate-600">
                               <span className="inline-flex items-center gap-2">
                                 <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                                Completado
-                              </span>
-                              <span className="inline-flex items-center gap-2">
-                                <span className="h-2.5 w-2.5 rounded-full bg-rose-500" />
-                                Incidencia
+                                Cerrado
                               </span>
                               <span className="inline-flex items-center gap-2">
                                 <span className="h-2.5 w-2.5 rounded-full bg-amber-500" />
@@ -4473,7 +4748,7 @@ const filteredRecords = useMemo(() => {
                         ) : null}
                       </button>
 
-                      {/* 2. INCIDENCIAS */}
+                      {/* 2. ANOMALÍAS */}
                       <button
                         type="button"
                         onClick={() => {
@@ -4485,7 +4760,7 @@ const filteredRecords = useMemo(() => {
                             : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                         }`}
                       >
-                        Incidencias
+                        Anomalías
                         {!viewedTabs.includes("worker-incidents") &&
                         justifiableIncidentRecords.length > 0 ? (
                           <span
@@ -4505,7 +4780,7 @@ const filteredRecords = useMemo(() => {
                           Mes activo
                         </p>
                         <p className="text-sm text-slate-700">
-                          Las solicitudes e incidencias se cargan para{" "}
+                          Las solicitudes y anomalías se cargan para{" "}
                           <span className="font-medium text-slate-900">
                             {formatMonthLabel(selectedMonth)}
                           </span>
@@ -4547,21 +4822,21 @@ const filteredRecords = useMemo(() => {
                     >
                       <div className="mb-4 space-y-1">
                         <h3 className="text-base font-semibold text-slate-900">
-                          Mis incidencias justificables
+                          Mis anomalías justificables
                         </h3>
                         <p className="text-sm text-slate-600">
-                          Aquí puedes ver las incidencias que admiten
+                          Aquí puedes ver las anomalías que admiten
                           justificación y enviarla para revisión.
                         </p>
                       </div>
 
                       {loading || incidentJustificationsLoading ? (
                         <p className="text-sm text-slate-500">
-                          Cargando incidencias justificables...
+                          Cargando anomalías justificables...
                         </p>
                       ) : justifiableIncidentRecords.length === 0 ? (
                         <p className="text-sm text-slate-500">
-                          No tienes incidencias pendientes de justificar.
+                          No tienes anomalías pendientes de justificar.
                         </p>
                       ) : (
                         <div className="space-y-4">
@@ -4595,11 +4870,11 @@ const filteredRecords = useMemo(() => {
 
                           {loading || incidentJustificationsLoading ? (
                             <p className="text-sm text-slate-500 text-center py-8">
-                              Cargando incidencias justificables...
+                              Cargando anomalías justificables...
                             </p>
                           ) : filteredWorkerIncidents.length === 0 ? (
                             <p className="text-sm text-slate-500 text-center py-8">
-                              No hay incidencias que coincidan con los filtros.
+                              No hay anomalías que coincidan con los filtros.
                             </p>
                           ) : (
                             <div className="space-y-3">
@@ -4658,7 +4933,7 @@ const filteredRecords = useMemo(() => {
                                             {getStatusDetailItems(record).map((item) => (
                                               <span
                                                 key={`${record.id}-${item}`}
-                                                className="inline-flex rounded-full border border-slate-100 bg-white px-3 py-1.5 text-[11px] font-medium leading-5 text-slate-500 shadow-sm"
+                                                className={`inline-flex rounded-full border bg-white px-3 py-1.5 text-[11px] font-medium leading-5 shadow-sm ${getStatusDetailItemOnWhiteClass(record)}`}
                                               >
                                                 {item}
                                               </span>
@@ -5144,7 +5419,7 @@ const filteredRecords = useMemo(() => {
                       Vista de Coordinación
                     </span>
                     <p>
-                      Aquí solo verás incidencias horarias de los trabajadores de tu ámbito.
+                      Aquí solo verás registros horarios por validar de los trabajadores de tu ámbito.
                     </p>
                   </div>
                 ) : null}
@@ -5271,7 +5546,17 @@ const filteredRecords = useMemo(() => {
                   {/* 3. ANOMALÍAS DEL EQUIPO */}
                   <button
                     type="button"
-                    onClick={() => setShowManagerIncidentsModal(true)}
+                    onClick={() => {
+                      setReviewModalMonth(
+                        reviewModalSelectedDate?.slice(0, 7) ??
+                          filteredManagerIncidentRecords[0]?.workDate.slice(
+                            0,
+                            7,
+                          ) ??
+                          trackerDate.slice(0, 7),
+                      );
+                      setShowManagerIncidentsModal(true);
+                    }}
                     className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-orange-300 hover:shadow-md active:scale-[0.98]"
                   >
                     <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-orange-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
@@ -5303,8 +5588,8 @@ const filteredRecords = useMemo(() => {
                       <div className="mt-5">
                         <h3 className="text-base font-bold text-slate-900">
                           {isCoordinatorManagerView
-                            ? "Incidencias horarias del equipo"
-                            : "Fichajes con incidencia"}
+                            ? "Registros horarios por validar"
+                            : "Fichajes por revisar"}
                         </h3>
                         <p className="mt-1 text-xs text-slate-500">
                           {isCoordinatorManagerView ? (
@@ -5333,7 +5618,7 @@ const filteredRecords = useMemo(() => {
                       <div className="mt-auto pt-6">
                         <span className="inline-flex items-center text-[11px] font-bold uppercase tracking-wider text-orange-600">
                           <span className="border-b border-orange-100 group-hover:border-orange-500 transition-colors">
-                            Abrir incidencias
+                            Abrir revisión
                           </span>
                           <span className="ml-1 transition-transform group-hover:translate-x-1">
                             →
@@ -5722,9 +6007,8 @@ const filteredRecords = useMemo(() => {
                 }
                options={[
                { value: "", label: "Todos" },
-               { value: "COMPLETED", label: "Completado" },
+               { value: "COMPLETED", label: "Cerrado" },
                { value: "OPEN", label: "Abierta" },
-               { value: "INCIDENT", label: "Incidencia" },
                { value: "ABSENT", label: "Ausente" },
               ]}
               />
@@ -5957,7 +6241,7 @@ const filteredRecords = useMemo(() => {
                             : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                         }`}
                       >
-                        Fichajes
+                        Solicitudes
                         {!viewedTabs.includes("requests") &&
                           pendingRequests.length > 0 && (
                             <span
@@ -5969,7 +6253,7 @@ const filteredRecords = useMemo(() => {
                       </button>
                     ) : null}
 
-                    {/* 2. INCIDENCIAS JUSTIFICADAS */}
+                    {/* 2. REVISIÓN HORARIA */}
                     <button
                       type="button"
                       onClick={() => handleTabClick("incidents")}
@@ -5980,8 +6264,8 @@ const filteredRecords = useMemo(() => {
                       }`}
                     >
                       {isCoordinatorManagerView
-                        ? "Incidencias horarias"
-                        : "Incidencias"}
+                        ? "Revisión horaria"
+                        : "Revisión"}
                       {!viewedTabs.includes("incidents") &&
                         pendingIncidentJustifications.length > 0 && (
                           <span
@@ -6003,7 +6287,7 @@ const filteredRecords = useMemo(() => {
                             : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                         }`}
                       >
-                        Registros
+                        Fichajes
                       </button>
                     ) : null}
 
@@ -6448,13 +6732,13 @@ const filteredRecords = useMemo(() => {
                       </p>
                       <h3 className="text-base font-semibold text-slate-900">
                         {isCoordinatorManagerView
-                          ? "Incidencias horarias del equipo"
-                          : "Control de incidencias y anomalías"}
+                          ? "Registros horarios por validar"
+                          : "Control de anomalías y justificaciones"}
                       </h3>
                       <p className="text-sm text-slate-600">
                         {isCoordinatorManagerView
                           ? "Revisa excesos o faltas de horas de los trabajadores de tu ámbito."
-                          : "Gestiona tanto las justificaciones enviadas por el equipo como los fichajes con errores detectados automáticamente."}
+                          : "Gestiona tanto las justificaciones enviadas por el equipo como los fichajes con anomalías detectadas automáticamente."}
                       </p>
                     </div>
 
@@ -6561,12 +6845,12 @@ const filteredRecords = useMemo(() => {
       </span>
       <span className="inline-flex items-center gap-1.5">
         <span className="h-2 w-2 rounded-full bg-orange-500" />
-        Días con incidencias horarias
+        Días con registros por validar
       </span>
     </div>
   </div>
 ) : null}
-{/* CONTENEDOR PRINCIPAL DE FILTROS - INCIDENCIAS */}
+{/* CONTENEDOR PRINCIPAL DE FILTROS - REVISIÓN */}
 <div className="mb-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
   <div className="flex flex-wrap items-end gap-4">
 
@@ -6780,44 +7064,15 @@ const filteredRecords = useMemo(() => {
                           <div className="h-1.5 w-1.5 rounded-full bg-orange-500" />
                           <h4 className="text-sm font-bold uppercase tracking-wider text-slate-700">
                             {isCoordinatorManagerView
-                              ? incidentRangeFilter === "week"
-                                ? "Registros horarios con incidencia de la semana ("
-                                : "Registros horarios con incidencia ("
-                              : incidentRangeFilter === "week"
-                                ? "Fichajes con incidencia de la semana ("
-                                : "Fichajes con incidencia ("}
+                              ? "Registros horarios por validar ("
+                              : "Fichajes por revisar ("}
                             {filteredManagerIncidentRecords.length})
                           </h4>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setIncidentRangeFilter("day")}
-                            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
-                              incidentRangeFilter === "day"
-                                ? "bg-slate-900 text-white shadow-sm"
-                                : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                            }`}
-                          >
-                            Hoy
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setIncidentRangeFilter("week")}
-                            className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
-                              incidentRangeFilter === "week"
-                                ? "bg-slate-900 text-white shadow-sm"
-                                : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                            }`}
-                          >
-                            Semana
-                          </button>
-                          <span className="text-xs text-slate-500">
-                            {incidentRangeFilter === "week"
-                              ? `${formatShortDate(incidentWeekRange.from)} - ${formatShortDate(incidentWeekRange.to)}`
-                              : formatShortDate(trackerDate)}
-                          </span>
+                        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600 shadow-sm">
+                          Usa los campos <span className="font-semibold text-slate-800">Desde</span> y{" "}
+                          <span className="font-semibold text-slate-800">Hasta</span> para revisar un día concreto o un periodo completo.
                         </div>
 
                         <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2 xl:grid-cols-6">
@@ -6884,7 +7139,7 @@ const filteredRecords = useMemo(() => {
                             }
                             options={[
                               { value: "", label: "Todos" },
-                              { value: "INCIDENT", label: "Incidencia" },
+                              { value: "INCIDENT", label: "Cerrado" },
                               { value: "INCOMPLETE", label: "Ausente" },
                             ]}
                           />
@@ -6902,19 +7157,18 @@ const filteredRecords = useMemo(() => {
                         {filteredManagerIncidentRecords.length === 0 ? (
                           <div className="flex h-32 flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50">
                             <p className="text-sm text-slate-500">
-                              No hay fichajes con incidencia que coincidan con
+                              No hay fichajes por revisar que coincidan con
                               los filtros.
                             </p>
                           </div>
                         ) : (
                           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                            <div className="hidden grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,2fr)_120px] gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 md:grid">
+                            <div className="hidden grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,2fr)] gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 md:grid">
                               <span>Trabajador</span>
                               <span>Fecha</span>
                               <span>Estado</span>
                               <span>Validación</span>
                               <span>Detalle</span>
-                              <span className="text-right">Acceso</span>
                             </div>
                             <div className="divide-y divide-slate-100">
                               {filteredManagerIncidentRecords.map((record) => (
@@ -6924,7 +7178,7 @@ const filteredRecords = useMemo(() => {
                                   onClick={() =>
                                     openManagerRecordDetail(record)
                                   }
-                                  className="group grid w-full gap-2 px-4 py-3 text-left transition hover:bg-orange-50/40 md:grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,2fr)_120px] md:items-center md:gap-3"
+                                  className="group grid w-full gap-2 px-4 py-3 text-left transition hover:bg-orange-50/40 md:grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,2fr)] md:items-center md:gap-3"
                                 >
                                   <div className="min-w-0">
                                     <p className="truncate text-sm font-semibold text-slate-900">
@@ -6962,19 +7216,30 @@ const filteredRecords = useMemo(() => {
                                     <p className="text-sm text-slate-700 md:hidden">
                                       {getRecordLine(record)}
                                     </p>
-                                    <p className="truncate text-sm text-slate-700">
-                                      {isCoordinatorManagerView
-                                        ? getCoordinatorIncidentDetail(record)
-                                        : getStatusDetail(record)}
-                                    </p>
-                                  </div>
-                                  <div className="flex items-center justify-between md:justify-end">
-                                    <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600 transition-colors group-hover:text-orange-700">
-                                      Abrir detalle
-                                    </span>
-                                    <span className="text-sm text-slate-300 transition-all group-hover:translate-x-0.5 group-hover:text-orange-400 md:ml-2">
-                                      →
-                                    </span>
+                                    {isCoordinatorManagerView ? (
+                                      <p className="text-sm text-slate-700">
+                                        {getCoordinatorIncidentDetail(record)}
+                                      </p>
+                                    ) : (
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {getStatusDetailItems(record).map((item) => (
+                                          <span
+                                            key={`${record.id}-list-detail-${item}`}
+                                            className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-4 ${getStatusDetailItemClass(record)}`}
+                                          >
+                                            {item}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    )}
+                                    <div className="mt-2 flex items-center gap-1">
+                                      <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600 transition-colors group-hover:text-orange-700">
+                                        Abrir detalle
+                                      </span>
+                                      <span className="text-sm text-slate-300 transition-all group-hover:translate-x-0.5 group-hover:text-orange-400">
+                                        →
+                                      </span>
+                                    </div>
                                   </div>
                                 </button>
                               ))}
@@ -7281,7 +7546,7 @@ const filteredRecords = useMemo(() => {
                           Equipo
                         </p>
                         <h3 className="text-base font-semibold text-slate-900">
-                          Registros del equipo
+                          Fichajes del equipo
                         </h3>
                         <p className="text-sm text-slate-600">
                           Consulta todos los fichajes registrados en el conjunto
@@ -7380,27 +7645,27 @@ const filteredRecords = useMemo(() => {
                           <tbody className="divide-y divide-slate-100">
                             {managerVisibleRecords.map((record) => (
                               <tr key={`manager-record-${record.id}`}>
-                                <td className="py-3 pr-4 pl-5 text-slate-700">
+                                <td className="py-4 pr-4 pl-5 text-slate-700">
                                   {getDisplayUserName(
                                     record.userId,
                                     record.userName,
                                   )}
                                 </td>
-                                <td className="py-3 pr-4 text-slate-700">
+                                <td className="py-4 pr-4 text-slate-700">
                                   {formatShortDate(record.workDate)}
                                 </td>
-                                <td className="py-3 pr-4 text-slate-700">
+                                <td className="py-4 pr-4 text-slate-700">
                                   {formatTimeOnly(record.checkInAt)}
                                 </td>
-                                <td className="py-3 pr-4 text-slate-700">
+                                <td className="py-4 pr-4 text-slate-700">
                                   {formatTimeOnly(record.checkOutAt)}
                                 </td>
-                                <td className="py-3 pr-4 text-slate-700">
+                                <td className="py-4 pr-4 text-slate-700">
                                   {formatHoursFromMinutes(record.workedMinutes)}
                                 </td>
-                                <td className="py-3 pr-4">
+                                <td className="py-4 pr-4">
                                   <span
-                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_CLASSES[getDisplayRecordStatus(record)]}`}
+                                    className={`inline-flex rounded-full px-3 py-1.5 text-xs font-medium ${STATUS_CLASSES[getDisplayRecordStatus(record)]}`}
                                   >
                                     {
                                       STATUS_LABELS[
@@ -7410,25 +7675,46 @@ const filteredRecords = useMemo(() => {
                                   </span>
                                 </td>
                                 <td
-                                  className="py-3 pr-4"
+                                  className="py-4 pr-4"
                                   title={getTrustTooltip(record)}
                                 >
                                   <span
-                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${TRUST_LEVEL_CLASSES[getDisplayTrustLevel(record)]}`}
+                                    className={`inline-flex rounded-full px-3 py-1.5 text-xs font-medium ${TRUST_LEVEL_CLASSES[getDisplayTrustLevel(record)]}`}
                                   >
                                     {getDisplayTrustLabel(record)}
                                   </span>
                                 </td>
-                                <td className="py-3 pr-4 text-slate-700">
-                                  <div className="space-y-2">
-                                    <p>
-                                      {isCoordinatorManagerView
-                                        ? getCoordinatorIncidentDetail(record)
-                                        : getStatusDetail(record)}
-                                    </p>
+                                <td className="py-4 pr-4">
+                                  <div className="space-y-4">
+                                    {isCoordinatorManagerView ? (
+                                      <p>{getCoordinatorIncidentDetail(record)}</p>
+                                    ) : shouldRenderStatusDetailItems(record) ? (
+                                      <div className="flex flex-wrap gap-2">
+                                        {getStatusDetailItems(record).map((item) => (
+                                          <span
+                                            key={`${record.id}-table-detail-${item}`}
+                                            className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-4 ${getStatusDetailItemClass(record)}`}
+                                          >
+                                            {item}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <div className="flex flex-wrap gap-2">
+                                        <span
+                                          className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-4 ${
+                                            record.status === "OPEN"
+                                              ? "border-amber-500 bg-transparent text-amber-700"
+                                              : "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                          }`}
+                                        >
+                                          {getStatusDetail(record)}
+                                        </span>
+                                      </div>
+                                    )}
                                     <button
                                       type="button"
-                                      className="group inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
+                                      className="group inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
                                       onClick={() =>
                                         setSelectedRecordForDetail(record)
                                       }
@@ -7457,6 +7743,92 @@ const filteredRecords = useMemo(() => {
           ) : null}
         </div>
       </section>
+      {openWorkdayWarning ? (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/45 px-4">
+          <div className="relative w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl">
+            <button
+              type="button"
+              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold leading-none text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              onClick={postponeOpenWorkdayWarning}
+              aria-label="Recordármelo después"
+            >
+              ×
+            </button>
+
+            <div className="flex items-start gap-4 pr-10">
+              <div
+                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-sm ring-1 ${
+                  openWorkdayWarning.level === "critical"
+                    ? "bg-rose-50 text-rose-600 ring-rose-100"
+                    : "bg-amber-50 text-amber-600 ring-amber-100"
+                }`}
+              >
+                <i
+                  className={`ti ${
+                    openWorkdayWarning.level === "critical"
+                      ? "ti-alert-triangle"
+                      : "ti-clock-exclamation"
+                  } text-[24px]`}
+                  aria-hidden="true"
+                />
+              </div>
+              <div className="min-w-0">
+                <p
+                  className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${
+                    openWorkdayWarning.level === "critical"
+                      ? "text-rose-600"
+                      : "text-amber-600"
+                  }`}
+                >
+                  Jornada abierta
+                </p>
+                <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
+                  {openWorkdayWarning.level === "critical"
+                    ? "Tu jornada lleva abierta demasiado tiempo"
+                    : "Tu jornada sigue abierta"}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {openWorkdayWarning.level === "critical"
+                    ? "Esta jornada lleva abierta desde hace más de 24 horas. Revisa si olvidaste fichar la salida."
+                    : "Tu jornada lleva abierta más de 8 horas y 15 minutos. Si ya has terminado, puedes fichar la salida ahora."}
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+              <p>
+                <span className="font-semibold text-slate-900">Entrada:</span>{" "}
+                {formatShortDate(openWorkdayWarning.record.workDate)} ·{" "}
+                {formatTimeOnly(openWorkdayWarning.record.checkInAt)}
+              </p>
+              <p className="mt-1 text-xs text-slate-500">
+                Tiempo abierta:{" "}
+                <span className="font-semibold text-slate-700">
+                  {formatHoursFromMinutes(openWorkdayWarning.minutesOpen)}
+                </span>
+              </p>
+            </div>
+
+            <div className="mt-5 flex flex-wrap justify-end gap-2">
+              <Button
+                variant="secondary"
+                className={POPUP_NEUTRAL_BUTTON_CLASS}
+                onClick={postponeOpenWorkdayWarning}
+                disabled={submitting}
+              >
+                Recordármelo después
+              </Button>
+              <Button
+                className={POPUP_PRIMARY_BUTTON_CLASS}
+                onClick={closeOpenWorkdayFromWarning}
+                disabled={submitting}
+              >
+                Fichar salida
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       {actionPopup ? (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 px-4">
           <div className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl">
@@ -7758,41 +8130,26 @@ const filteredRecords = useMemo(() => {
   <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
     <div>
       <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-        Rango actual
+        Revisión actual
       </p>
       <p className="mt-0.5 text-base font-semibold text-slate-900 tracking-tight">
-        {incidentRangeFilter === "week"
-          ? "Registros con anomalías de la semana"
-          : "Registros con anomalías"}
+        Fichajes por revisar
       </p>
-      <div className="mt-2 flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setIncidentRangeFilter("day")}
-          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
-            incidentRangeFilter === "day"
-              ? "bg-slate-900 text-white shadow-sm"
-              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-          }`}
-        >
-          Hoy
-        </button>
-        <button
-          type="button"
-          onClick={() => setIncidentRangeFilter("week")}
-          className={`rounded-full px-3 py-1.5 text-xs font-semibold transition-all ${
-            incidentRangeFilter === "week"
-              ? "bg-slate-900 text-white shadow-sm"
-              : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-          }`}
-        >
-          Semana
-        </button>
-        <span className="text-xs text-slate-500">
-          {incidentRangeFilter === "week"
-            ? `${formatShortDate(incidentWeekRange.from)} - ${formatShortDate(incidentWeekRange.to)}`
-            : formatShortDate(trackerDate)}
-        </span>
+      <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+        {incidentRecordDateFrom || incidentRecordDateTo ? (
+          <span>
+            Rango:{" "}
+            <span className="font-semibold text-slate-700">
+              {incidentRecordDateFrom ? formatShortDate(incidentRecordDateFrom) : "sin inicio"}
+            </span>{" "}
+            -{" "}
+            <span className="font-semibold text-slate-700">
+              {incidentRecordDateTo ? formatShortDate(incidentRecordDateTo) : "sin fin"}
+            </span>
+          </span>
+        ) : (
+          <span>Mostrando todos los registros que coinciden con los filtros actuales.</span>
+        )}
       </div>
       
       {/* Contenedor de Badges */}
@@ -7800,15 +8157,14 @@ const filteredRecords = useMemo(() => {
         {modalManagerIncidentRecords.filter((r) => r.status === "INCIDENT").length > 0 && (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
             <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-            {modalManagerIncidentRecords.filter((r) => r.status === "INCIDENT").length} incidencia
-            {modalManagerIncidentRecords.filter((r) => r.status === "INCIDENT").length !== 1 ? "s" : ""}
+            {modalManagerIncidentRecords.filter((r) => r.status === "INCIDENT").length} por revisar
           </span>
         )}
         
         {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length > 0 && (
           <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
             <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-            {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length} incompleta
+            {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length} ausente
             {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length !== 1 ? "s" : ""}
           </span>
         )}
@@ -7827,9 +8183,122 @@ const filteredRecords = useMemo(() => {
 
   {/* Cuerpo de Registros */}
   <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+    <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+            Día
+          </span>
+          <span className="truncate text-xs font-semibold text-slate-700">
+            {reviewModalSelectedDate
+              ? formatShortDate(reviewModalSelectedDate)
+              : "Todos los días"}
+          </span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          {reviewModalSelectedDate ? (
+            <button
+              type="button"
+              onClick={() => setReviewModalSelectedDate(null)}
+              className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+            >
+              Ver todos
+            </button>
+          ) : null}
+          <div className="flex items-center gap-1 rounded-full bg-slate-50 px-1.5 py-1 ring-1 ring-inset ring-slate-200">
+            <button
+              type="button"
+              onClick={() =>
+                setReviewModalMonth((current) =>
+                  shiftMonthValue(current, -1),
+                )
+              }
+              className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-900 hover:shadow-sm"
+              aria-label="Mes anterior"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+              </svg>
+            </button>
+            <span className="min-w-[104px] text-center text-xs font-bold capitalize text-slate-700">
+              {formatMonthLabel(reviewModalMonth)}
+            </span>
+            <button
+              type="button"
+              onClick={() =>
+                setReviewModalMonth((current) =>
+                  shiftMonthValue(current, 1),
+                )
+              }
+              className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-900 hover:shadow-sm"
+              aria-label="Mes siguiente"
+            >
+              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-7 gap-1 text-center">
+        {CALENDAR_WEEKDAY_LABELS.map((label, index) => (
+          <div
+            key={`review-modal-weekday-${label}`}
+            className={`text-[9px] font-bold uppercase tracking-wider ${index >= 5 ? "text-rose-400" : "text-slate-400"}`}
+          >
+            {label}
+          </div>
+        ))}
+        {reviewModalCalendarWeeks.flat().map((cell, index) => {
+          if (!cell.workDate || !cell.dayNumber) {
+            return (
+              <div
+                key={`review-modal-empty-${index}`}
+                className="h-7 rounded-lg"
+              />
+            );
+          }
+
+          const dayCount = reviewModalRecordCounts.get(cell.workDate) ?? 0;
+          const isSelected = cell.workDate === reviewModalSelectedDate;
+
+          return (
+            <button
+              key={`review-modal-day-${cell.workDate}`}
+              type="button"
+              onClick={() =>
+                setReviewModalSelectedDate((current) =>
+                  current === cell.workDate ? null : cell.workDate,
+                )
+              }
+              className={`flex h-7 flex-col items-center justify-center rounded-lg text-[11px] font-semibold transition ${
+                isSelected
+                  ? "bg-slate-900 text-white shadow-sm"
+                  : dayCount > 0
+                    ? "bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-200 hover:bg-orange-100"
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+              } ${cell.isWeekend ? "text-rose-500" : ""} ${cell.isToday && !isSelected ? "ring-2 ring-sky-100" : ""}`}
+            >
+              <span>{cell.dayNumber}</span>
+              <span
+                className={`mt-0.5 h-1 w-1 rounded-full ${
+                  dayCount > 0
+                    ? isSelected
+                      ? "bg-white"
+                      : "bg-orange-500"
+                    : "bg-transparent"
+                }`}
+              />
+            </button>
+          );
+        })}
+      </div>
+    </div>
+
     {modalManagerIncidentRecords.length === 0 ? (
       <p className="text-sm text-slate-500 text-center py-4">
-        No hay incidencias en el conjunto filtrado actualmente.
+        No hay registros por validar en el conjunto filtrado actualmente.
       </p>
     ) : (
       <div className="space-y-2">
@@ -7885,7 +8354,7 @@ const filteredRecords = useMemo(() => {
     </svg>
     <p className="text-xs text-slate-400 leading-normal">
       Las justificaciones enviadas por los trabajadores aparecerán en{" "}
-      <span className="font-semibold text-slate-500">Incidencias</span> para su revisión.
+      <span className="font-semibold text-slate-500">Revisión</span> para su revisión.
     </p>
   </div>
 </div>
@@ -7963,7 +8432,7 @@ const filteredRecords = useMemo(() => {
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4">
               <div className="space-y-1">
                 <h3 className="text-base font-semibold text-slate-900">
-                  Justificar incidencia
+                  Justificar anomalía
                 </h3>
                 <p className="text-sm text-slate-600">
                   Explica el motivo para que coordinación y administración
@@ -8040,7 +8509,7 @@ const filteredRecords = useMemo(() => {
                 </h3>
                 <p className="max-w-md text-sm leading-6 text-slate-600">
                   Esta acción quitará de tu vista la respuesta administrativa
-                  de esta incidencia.
+                  de este registro.
                 </p>
               </div>
             </div>
@@ -8049,7 +8518,7 @@ const filteredRecords = useMemo(() => {
               <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 text-sm text-slate-700">
                 <div className="space-y-1">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">
-                    Incidencia
+                    Registro
                   </p>
                   <p className="font-medium text-slate-900">
                     {incidentJustificationToDelete.workDate
@@ -8095,6 +8564,97 @@ const filteredRecords = useMemo(() => {
                   {deletingIncidentJustificationId
                     ? "Eliminando..."
                     : "Eliminar"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {isManagerMode && adminCloseRecord ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
+          <div className="relative w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+            <button
+              type="button"
+              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold leading-none text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              onClick={closeAdminCloseModal}
+              disabled={adminCloseSubmitting}
+              aria-label="Volver al detalle"
+              title="Volver al detalle"
+            >
+              ×
+            </button>
+            <div className="flex items-start gap-3 border-b border-slate-100 pb-4 pr-12">
+              <div className="flex items-start gap-3">
+                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-slate-50 text-slate-700 shadow-sm ring-1 ring-slate-200">
+                  <i className="ti ti-lock-check text-[21px]" aria-hidden="true" />
+                </span>
+                <div className="space-y-1">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">
+                    Cierre administrativo
+                  </p>
+                  <h3 className="text-lg font-semibold tracking-tight text-slate-900">
+                    Cerrar jornada abierta
+                  </h3>
+                  <p className="max-w-md text-sm leading-6 text-slate-600">
+                    Se registrará una salida manual para{" "}
+                    <span className="font-semibold text-slate-900">
+                      {getDisplayUserName(
+                        adminCloseRecord.userId,
+                        adminCloseRecord.userName,
+                      )}
+                    </span>
+                    .
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-4 space-y-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/70 p-4 text-sm text-slate-700">
+                <p>
+                  <span className="font-semibold text-slate-900">Entrada:</span>{" "}
+                  {formatShortDate(adminCloseRecord.workDate)} ·{" "}
+                  {formatTimeOnly(adminCloseRecord.checkInAt)}
+                </p>
+              </div>
+
+              <Input
+                label="Hora de salida"
+                type="datetime-local"
+                value={adminCloseCheckOutAt}
+                onChange={(event) => setAdminCloseCheckOutAt(event.target.value)}
+              />
+
+              <div className="space-y-1.5">
+                <label className="block text-sm font-medium text-slate-700">
+                  Mensaje para el trabajador
+                </label>
+                <textarea
+                  className="min-h-[110px] w-full resize-none rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
+                  placeholder="Ej. Jornada cerrada por administración tras revisar el fichaje abierto."
+                  value={adminCloseComment}
+                  onChange={(event) => setAdminCloseComment(event.target.value)}
+                />
+                <p className="text-xs text-slate-500">
+                  Este mensaje aparecerá en el detalle de la jornada del trabajador.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="secondary"
+                  className={POPUP_NEUTRAL_BUTTON_CLASS}
+                  onClick={closeAdminCloseModal}
+                  disabled={adminCloseSubmitting}
+                >
+                  Cancelar
+                </Button>
+                <Button
+                  className={POPUP_PRIMARY_BUTTON_CLASS}
+                  onClick={closeRecordAsAdmin}
+                  disabled={adminCloseSubmitting}
+                >
+                  {adminCloseSubmitting ? "Cerrando..." : "Cerrar jornada"}
                 </Button>
               </div>
             </div>

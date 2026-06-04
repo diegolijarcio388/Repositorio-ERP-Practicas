@@ -1,6 +1,7 @@
 import type { AuthenticatedApiUser } from "../../vacations/domain/types";
 import { createDirectoryRepository } from "../../vacations/repositories/directory.repository";
 import type {
+  AdminCloseWorkdayRecordInput,
   CloseCheckOutInput,
   CreateCheckInInput,
   IncidentFlag,
@@ -533,6 +534,12 @@ export interface WorkdayRecordsService {
     status: Extract<TimeControlAdminValidationStatus, "APPROVED" | "REJECTED">,
     comment?: string | null,
   ): Promise<WorkdayRecord>;
+  closeRecordAsAdmin(
+    user: AuthenticatedApiUser,
+    recordId: string,
+    checkOutAt: string,
+    comment?: string | null,
+  ): Promise<WorkdayRecord>;
 }
 
 export class TimeControlService implements WorkdayRecordsService {
@@ -848,6 +855,78 @@ export class TimeControlService implements WorkdayRecordsService {
         updatedAt: toSqlDateTime(now),
       }),
     );
+  }
+
+  async closeRecordAsAdmin(
+    user: AuthenticatedApiUser,
+    recordId: string,
+    checkOutAt: string,
+    comment?: string | null,
+  ): Promise<WorkdayRecord> {
+    if (!hasGlobalTimeControlManagement(user)) {
+      throw new Error("FORBIDDEN");
+    }
+
+    const record = await this.repository.findById(recordId);
+    if (!record) {
+      throw new Error("No se encontró el fichaje.");
+    }
+
+    if (record.status !== "OPEN" && record.checkOutAt) {
+      throw new Error("Esta jornada ya está cerrada.");
+    }
+
+    const normalizedCheckOutAt = checkOutAt.trim();
+    if (!normalizedCheckOutAt) {
+      throw new Error("Debes indicar la hora de salida.");
+    }
+
+    const workedDurationMs = calculateWorkedDurationMs(
+      record.checkInAt,
+      normalizedCheckOutAt,
+    );
+    const workedMinutes = calculateWorkedMinutes(workedDurationMs);
+
+    if (workedDurationMs <= 0) {
+      throw new Error("La hora de salida debe ser posterior a la hora de entrada.");
+    }
+
+    const assignedShift = await this.shiftsService.findAssignedShiftByUserId(
+      record.userId,
+    );
+    const resolvedSegment = resolveShiftSegmentForRecord(
+      assignedShift,
+      record.checkInAt,
+    );
+    const existingFlags =
+      record.incidentFlags?.filter((flag) => flag !== "NO_CHECKOUT") ?? null;
+    const incidentFlags = mergeIncidentFlags(
+      existingFlags,
+      buildIncidentFlags(
+        workedMinutes,
+        resolvedSegment?.expectedWorkedMinutes ?? DEFAULT_EXPECTED_WORKDAY_MINUTES,
+      ),
+    );
+    const overtimeMinutes = calculateOvertimeMinutes(
+      workedMinutes,
+      resolvedSegment?.expectedWorkedMinutes ?? DEFAULT_EXPECTED_WORKDAY_MINUTES,
+    );
+    const nowSql = toSqlDateTime(new Date());
+    const trimmedComment = comment?.trim() ?? "";
+    const input: AdminCloseWorkdayRecordInput = {
+      recordId,
+      checkOutAt: normalizedCheckOutAt,
+      workedMinutes,
+      overtimeMinutes,
+      status: incidentFlags ? "INCIDENT" : "COMPLETED",
+      incidentFlags,
+      adminCloseComment: trimmedComment || null,
+      closedByAdminId: user.userId,
+      closedByAdminAt: nowSql,
+      updatedAt: nowSql,
+    };
+
+    return this.decorateRecord(await this.repository.closeByAdmin(input));
   }
 
   private async getAllowedUserIds(

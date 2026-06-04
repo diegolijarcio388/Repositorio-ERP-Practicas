@@ -1,5 +1,6 @@
 import { getMySqlPool } from "../../../core/db/mysql";
 import type {
+  AdminCloseWorkdayRecordInput,
   CloseCheckOutInput,
   CreateCheckInInput,
   IncidentFlag,
@@ -24,6 +25,8 @@ export interface WorkdayRecordsRepository {
   ): Promise<WorkdayRecord | null>;
 
   closeCheckOut(input: CloseCheckOutInput): Promise<WorkdayRecord>;
+
+  closeByAdmin(input: AdminCloseWorkdayRecordInput): Promise<WorkdayRecord>;
 
   reviewAdminValidation(
     input: ReviewWorkdayAdminValidationInput,
@@ -67,6 +70,9 @@ interface DbWorkdayRecordRow {
   admin_validated_by: string | null;
   admin_validated_at: string | null;
   admin_validation_comment: string | null;
+  admin_close_comment: string | null;
+  closed_by_admin_id: string | null;
+  closed_by_admin_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -114,6 +120,9 @@ const mapRow = (row: DbWorkdayRecordRow): WorkdayRecord => ({
   adminValidatedBy: row.admin_validated_by,
   adminValidatedAt: row.admin_validated_at,
   adminValidationComment: row.admin_validation_comment,
+  adminCloseComment: row.admin_close_comment,
+  closedByAdminId: row.closed_by_admin_id,
+  closedByAdminAt: row.closed_by_admin_at,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
 });
@@ -129,8 +138,10 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
         check_in_ip_address, check_out_ip_address, check_in_user_agent,
         check_out_user_agent, check_in_device_reason, check_out_device_reason,
         requires_admin_validation, admin_validation_reason, admin_validation_status,
-        admin_validated_by, admin_validated_at, admin_validation_comment, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, NULL, ?, NULL, ?, NULL, ?, ?, ?, NULL, NULL, NULL, ?, ?)`,
+        admin_validated_by, admin_validated_at, admin_validation_comment,
+        admin_close_comment, closed_by_admin_id, closed_by_admin_at,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, NULL, ?, NULL, ?, NULL, ?, ?, ?, NULL, NULL, NULL, NULL, NULL, NULL, ?, ?)`,
       [
         input.id,
         input.userId,
@@ -168,6 +179,7 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
               check_out_user_agent, check_in_device_reason, check_out_device_reason,
               requires_admin_validation, admin_validation_reason, admin_validation_status,
               admin_validated_by, admin_validated_at, admin_validation_comment,
+              admin_close_comment, closed_by_admin_id, closed_by_admin_at,
               created_at, updated_at
        FROM workday_records
        WHERE user_id = ? AND status = 'OPEN'
@@ -191,6 +203,7 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
               check_out_user_agent, check_in_device_reason, check_out_device_reason,
               requires_admin_validation, admin_validation_reason, admin_validation_status,
               admin_validated_by, admin_validated_at, admin_validation_comment,
+              admin_close_comment, closed_by_admin_id, closed_by_admin_at,
               created_at, updated_at
        FROM workday_records
        WHERE user_id = ? AND work_date = ?
@@ -220,6 +233,9 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
            admin_validated_by = ?,
            admin_validated_at = ?,
            admin_validation_comment = ?,
+           admin_close_comment = ?,
+           closed_by_admin_id = ?,
+           closed_by_admin_at = ?,
            updated_at = ?
        WHERE id = ?`,
       [
@@ -240,12 +256,49 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
         input.adminValidatedBy,
         input.adminValidatedAt,
         input.adminValidationComment,
+        input.adminCloseComment ?? null,
+        input.closedByAdminId ?? null,
+        input.closedByAdminAt ?? null,
         input.updatedAt,
         input.recordId,
       ],
     );
     const updated = await this.findById(input.recordId);
     if (!updated) throw new Error("No se pudo actualizar el registro de jornada.");
+    return updated;
+  }
+
+  async closeByAdmin(input: AdminCloseWorkdayRecordInput): Promise<WorkdayRecord> {
+    await getMySqlPool().query(
+      `UPDATE workday_records
+       SET check_out_at = ?,
+           worked_minutes = ?,
+           overtime_minutes = ?,
+           status = ?,
+           incident_flags = ?,
+           admin_close_comment = ?,
+           closed_by_admin_id = ?,
+           closed_by_admin_at = ?,
+           updated_at = ?
+       WHERE id = ?`,
+      [
+        input.checkOutAt,
+        input.workedMinutes,
+        input.overtimeMinutes,
+        input.status,
+        input.incidentFlags ? JSON.stringify(input.incidentFlags) : null,
+        input.adminCloseComment,
+        input.closedByAdminId,
+        input.closedByAdminAt,
+        input.updatedAt,
+        input.recordId,
+      ],
+    );
+
+    const updated = await this.findById(input.recordId);
+    if (!updated) {
+      throw new Error("No se pudo cerrar la jornada desde administración.");
+    }
     return updated;
   }
 
@@ -306,6 +359,7 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
               check_out_user_agent, check_in_device_reason, check_out_device_reason,
               requires_admin_validation, admin_validation_reason, admin_validation_status,
               admin_validated_by, admin_validated_at, admin_validation_comment,
+              admin_close_comment, closed_by_admin_id, closed_by_admin_at,
               created_at, updated_at
        FROM workday_records
        WHERE ${conditions.join(" AND ")}
@@ -345,6 +399,7 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
               check_out_user_agent, check_in_device_reason, check_out_device_reason,
               requires_admin_validation, admin_validation_reason, admin_validation_status,
               admin_validated_by, admin_validated_at, admin_validation_comment,
+              admin_close_comment, closed_by_admin_id, closed_by_admin_at,
               created_at, updated_at
        FROM workday_records
        WHERE ${conditions.join(" AND ")}
@@ -380,6 +435,7 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
               check_out_user_agent, check_in_device_reason, check_out_device_reason,
               requires_admin_validation, admin_validation_reason, admin_validation_status,
               admin_validated_by, admin_validated_at, admin_validation_comment,
+              admin_close_comment, closed_by_admin_id, closed_by_admin_at,
               created_at, updated_at
        FROM workday_records
        WHERE ${conditions.join(" AND ")}
@@ -399,6 +455,7 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
               check_out_user_agent, check_in_device_reason, check_out_device_reason,
               requires_admin_validation, admin_validation_reason, admin_validation_status,
               admin_validated_by, admin_validated_at, admin_validation_comment,
+              admin_close_comment, closed_by_admin_id, closed_by_admin_at,
               created_at, updated_at
        FROM workday_records
        WHERE id = ?
@@ -422,6 +479,7 @@ class MySqlWorkdayRecordsRepository implements WorkdayRecordsRepository {
               check_out_user_agent, check_in_device_reason, check_out_device_reason,
               requires_admin_validation, admin_validation_reason, admin_validation_status,
               admin_validated_by, admin_validated_at, admin_validation_comment,
+              admin_close_comment, closed_by_admin_id, closed_by_admin_at,
               created_at, updated_at
        FROM workday_records
        WHERE id IN (${ids.map(() => "?").join(", ")})`,

@@ -82,6 +82,9 @@ export interface WorkdayRecord {
   adminValidatedBy: string | null;
   adminValidatedAt: string | null;
   adminValidationComment: string | null;
+  adminCloseComment: string | null;
+  closedByAdminId: string | null;
+  closedByAdminAt: string | null;
   trustLevel?: WorkdayTrustLevel;
   isTrustedNetwork?: boolean;
   createdAt: string;
@@ -176,10 +179,26 @@ export interface CloseCheckOutInput {
   adminValidatedBy: string | null;
   adminValidatedAt: string | null;
   adminValidationComment: string | null;
+  adminCloseComment?: string | null;
+  closedByAdminId?: string | null;
+  closedByAdminAt?: string | null;
   workedMinutes: number;
   overtimeMinutes: number;
   status: WorkdayStatus;
   incidentFlags: IncidentFlag[] | null;
+  updatedAt: string;
+}
+
+export interface AdminCloseWorkdayRecordInput {
+  recordId: string;
+  checkOutAt: string;
+  workedMinutes: number;
+  overtimeMinutes: number;
+  status: WorkdayStatus;
+  incidentFlags: IncidentFlag[] | null;
+  adminCloseComment: string | null;
+  closedByAdminId: string;
+  closedByAdminAt: string;
   updatedAt: string;
 }
 
@@ -197,6 +216,7 @@ export interface CreateWorkdayAdjustmentRequestInput {
   adminComment: string | null;
   reviewedByCoordinatorId: string | null;
   reviewedByAdminId: string | null;
+  hiddenByWorkerAt?: string | null;
   createdAt: string;
   updatedAt: string;
 }
