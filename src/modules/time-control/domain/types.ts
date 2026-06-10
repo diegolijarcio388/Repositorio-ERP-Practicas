@@ -137,6 +137,7 @@ export interface WorkdayFilters {
   dateFrom?: string;
   dateTo?: string;
   status?: WorkdayStatus;
+  includeOpen?: boolean;
 }
 
 export interface CreateCheckInInput {

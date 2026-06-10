@@ -2,6 +2,7 @@
 import type { UserSession } from "../../../core/types";
 import { useRef } from "react";
 import { Badge, Button, Input, Modal, Select, Table } from "../../../shared/ui";
+import excelIcon from "./img/icons8-excel-48.png"; // Ajusta los puntos según dónde esté tu archivo respecto a este
 import type {
   AdjustmentRequestStatus,
   AdjustmentRequestType,
@@ -17,6 +18,7 @@ interface TimeControlFeatureProps {
   session: UserSession;
   mode: "worker" | "manager";
   workerView?: "overview" | "requests";
+  onWorkerViewChange?: (view: "overview" | "requests") => void;
   headerSlot?: React.ReactNode;
 }
 
@@ -37,6 +39,9 @@ const STATUS_CLASSES: Record<DisplayWorkdayStatus, string> = {
   ABSENT: "border border-slate-400 bg-transparent text-slate-600",
   INCIDENT: "border border-rose-500 bg-transparent text-rose-700",
 };
+
+const SOFT_STATUS_CHIP_CLASS =
+  "inline-flex rounded-full border bg-transparent px-3 py-1 text-xs font-medium leading-5";
 
 const CALENDAR_STATUS_BADGE_CLASSES: Record<DisplayWorkdayStatus, string> = {
   OPEN: "border border-amber-500 bg-transparent text-amber-700",
@@ -83,7 +88,7 @@ const INCIDENT_JUSTIFICATION_STATUS_CLASSES: Record<
   WorkdayIncidentJustification["status"],
   string
 > = {
-  PENDING_COORDINATOR: "border border-amber-500 bg-transparent text-amber-700",
+  PENDING_COORDINATOR: "border border-orange-500 bg-transparent text-orange-700",
   PENDING_ADMIN: "border border-orange-500 bg-transparent text-orange-700",
   APPROVED: "border border-emerald-500 bg-transparent text-emerald-700",
   REJECTED: "border border-rose-500 bg-transparent text-rose-700",
@@ -136,6 +141,9 @@ const formatMonthLabel = (monthValue: string): string => {
     year: "numeric",
   }).format(new Date(Date.UTC(year, month - 1, 1)));
 };
+
+const formatMonthName = (monthValue: string): string =>
+  formatMonthLabel(monthValue).replace(/\s+de\s+\d{4}$/i, "");
 
 const shiftMonthValue = (monthValue: string, delta: number): string => {
   const [year, month] = monthValue.split("-").map(Number);
@@ -270,7 +278,7 @@ const getIncidentFlagMessage = (flag: IncidentFlag): string => {
     case "OUT_OF_ALLOWED_LOCATION":
       return "Fichaje fuera del punto de fichaje permitido";
     case "DEVICE_NOT_ALLOWED":
-      return "Fichaje desde dispositivo no permitido";
+      return "Dispositivo no permitido";
     default:
       return flag;
   }
@@ -475,6 +483,13 @@ const POPUP_PRIMARY_BUTTON_CLASS =
 
 const POPUP_DANGER_BUTTON_CLASS =
   "flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-rose-700";
+
+const DETAIL_ACTION_BUTTON_CLASS =
+  "group inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50/40 px-3.5 text-xs font-semibold text-orange-700 shadow-sm transition-all duration-300 hover:border-orange-300 hover:bg-orange-50 hover:text-orange-800 hover:shadow active:scale-95";
+
+const DETAIL_ACTION_ICON_CLASS =
+  "ti ti-external-link text-[14px] text-orange-500 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:text-orange-600";
+
 const OPEN_WORKDAY_WARNING_MINUTES = 8 * 60 + 15;
 const OPEN_WORKDAY_CRITICAL_MINUTES = 24 * 60;
 
@@ -491,7 +506,11 @@ const getDeviceTypeLabel = (deviceType: WorkdayDeviceType | null): string =>
 const getDisplayTrustLevel = (
   record: WorkdayRecord,
 ): DisplayWorkdayTrustLevel => {
-  if (record.adminValidationStatus === "APPROVED") {
+  if (
+    record.adminValidationStatus === "APPROVED" ||
+    record.closedByAdminAt ||
+    record.adminCloseComment
+  ) {
     return "CORRECT";
   }
 
@@ -638,6 +657,22 @@ const sqlDateTimeToDateTimeLocal = (value?: string | null): string => {
   return value.replace(" ", "T").slice(0, 16);
 };
 
+const addHoursToSqlDateTimeLocal = (
+  value: string | null | undefined,
+  hours: number,
+): string => {
+  if (!value) return "";
+  const date = new Date(value.replace(" ", "T"));
+  if (Number.isNaN(date.getTime())) return sqlDateTimeToDateTimeLocal(value);
+  date.setHours(date.getHours() + hours);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hour}:${minute}`;
+};
+
 const getMinutesFromTimeValue = (value?: string | null): number | null => {
   if (!value) return null;
   const [hours, minutes] = value.split(":").map(Number);
@@ -770,6 +805,14 @@ const getQuadrantRecordColorClasses = (record: WorkdayRecord): string => {
 
 const getStatusDetail = (record: WorkdayRecord): string => {
   if (
+    record.adminValidationStatus === "APPROVED" ||
+    record.closedByAdminAt ||
+    record.adminCloseComment
+  ) {
+    return "Fichaje completado sin problemas.";
+  }
+
+  if (
     record.requiresAdminValidation &&
     record.adminValidationStatus === "PENDING"
   ) {
@@ -828,6 +871,14 @@ const getStatusDetail = (record: WorkdayRecord): string => {
 };
 
 const getStatusDetailItems = (record: WorkdayRecord): string[] => {
+  if (
+    record.adminValidationStatus === "APPROVED" ||
+    record.closedByAdminAt ||
+    record.adminCloseComment
+  ) {
+    return ["Fichaje completado sin problemas"];
+  }
+
   const items: string[] = [];
 
   if (
@@ -854,11 +905,19 @@ const getStatusDetailItems = (record: WorkdayRecord): string[] => {
 const getStatusDetailItemClass = (record: WorkdayRecord): string =>
   record.status === "OPEN"
     ? "border-amber-500 bg-transparent text-amber-700"
+    : record.adminValidationStatus === "APPROVED" ||
+        record.closedByAdminAt ||
+        record.adminCloseComment
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700"
     : "border-sky-200 bg-sky-50 text-sky-700";
 
 const getStatusDetailItemOnWhiteClass = (record: WorkdayRecord): string =>
   record.status === "OPEN"
     ? "border-amber-500 text-amber-700"
+    : record.adminValidationStatus === "APPROVED" ||
+        record.closedByAdminAt ||
+        record.adminCloseComment
+      ? "border-emerald-200 text-emerald-700"
     : "border-sky-200 text-sky-700";
 
 const shouldRenderStatusDetailItems = (record: WorkdayRecord): boolean =>
@@ -880,6 +939,17 @@ const COORDINATOR_REVIEWABLE_INCIDENT_FLAGS: IncidentFlag[] = [
 
 const hasJustifiableIncident = (flags: IncidentFlag[] | null): boolean =>
   Boolean(flags?.some((flag) => JUSTIFIABLE_INCIDENT_FLAGS.includes(flag)));
+
+const getJustifiableIncidentDetailItems = (
+  flags: IncidentFlag[] | null,
+): string[] =>
+  Array.from(
+    new Set(
+      (flags ?? [])
+        .filter((flag) => JUSTIFIABLE_INCIDENT_FLAGS.includes(flag))
+        .map(getIncidentFlagMessage),
+    ),
+  );
 
 const hasCoordinatorReviewableIncident = (flags: IncidentFlag[] | null): boolean =>
   Boolean(
@@ -940,6 +1010,7 @@ export function TimeControlFeature({
   session,
   mode,
   workerView = "overview",
+  onWorkerViewChange,
   headerSlot,
 }: TimeControlFeatureProps) {
   const tabPanelAnimationStyle = {
@@ -1027,6 +1098,8 @@ export function TimeControlFeature({
   const [reviewModalSelectedDate, setReviewModalSelectedDate] = useState<
     string | null
   >(null);
+  const [coordinatorCalendarDetailDate, setCoordinatorCalendarDetailDate] =
+    useState<string | null>(null);
 const [filterValidationStatus, setFilterValidationStatus] = useState<string>("ALL");  const [managerUserFilter, setManagerUserFilter] = useState("");
   const [managerUserSearch, setManagerUserSearch] = useState("");
   const [managerDateFrom, setManagerDateFrom] = useState("");
@@ -1059,6 +1132,10 @@ const [filterValidationStatus, setFilterValidationStatus] = useState<string>("AL
   >("");
   const [incidentRecordUserFilter, setIncidentRecordUserFilter] = useState("");
   const [incidentRecordUserSearch, setIncidentRecordUserSearch] = useState("");
+  const [
+    showIncidentRecordUserSuggestions,
+    setShowIncidentRecordUserSuggestions,
+  ] = useState(false);
   const [incidentRecordDateFrom, setIncidentRecordDateFrom] = useState("");
   const [incidentRecordDateTo, setIncidentRecordDateTo] = useState("");
   const [incidentRecordTrustFilter, setIncidentRecordTrustFilter] = useState<
@@ -1087,6 +1164,7 @@ const [filterValidationStatus, setFilterValidationStatus] = useState<string>("AL
     setIncidentRecordStatusFilter("");
     setIncidentRecordUserFilter("");
     setIncidentRecordUserSearch("");
+    setShowIncidentRecordUserSuggestions(false);
     setIncidentRecordDateFrom("");
     setIncidentRecordDateTo("");
     setIncidentRecordTrustFilter("");
@@ -1112,7 +1190,7 @@ const [filterValidationStatus, setFilterValidationStatus] = useState<string>("AL
   const [workerRequestsTab, setWorkerRequestsTab] =
     useState<WorkerRequestsTab>("requests");
   const [managerReviewTab, setManagerReviewTab] =
-    useState<ManagerReviewTab>("records");
+    useState<ManagerReviewTab>("tracker");
   const [selectedRecordForDetail, setSelectedRecordForDetail] =
     useState<WorkdayRecord | null>(null);
   const [adminCloseRecord, setAdminCloseRecord] =
@@ -1127,6 +1205,13 @@ const [filterValidationStatus, setFilterValidationStatus] = useState<string>("AL
     level: "warning" | "critical";
     minutesOpen: number;
   } | null>(null);
+  const [adminClosedWorkdayNotice, setAdminClosedWorkdayNotice] =
+    useState<WorkdayRecord | null>(null);
+  const [globalWorkerRecords, setGlobalWorkerRecords] = useState<
+    WorkdayRecord[]
+  >([]);
+  const [adminReviewedRequestNotice, setAdminReviewedRequestNotice] =
+    useState<WorkdayAdjustmentRequest | null>(null);
   const [selectedIncidentRecordId, setSelectedIncidentRecordId] = useState<
     string | null
   >(null);
@@ -1442,6 +1527,7 @@ const filteredRecords = useMemo(() => {
     if (mode === "worker") {
       if (monthRange.from) params.set("dateFrom", monthRange.from);
       if (monthRange.to) params.set("dateTo", monthRange.to);
+      params.set("includeOpen", "1");
     }
     return `${base}?${params.toString()}`;
   }, [mode, monthRange]);
@@ -1526,6 +1612,15 @@ const filteredRecords = useMemo(() => {
   const normalizedIncidentRecordUserSearch = incidentRecordUserSearch
     .trim()
     .toLocaleLowerCase("es-ES");
+  const incidentRecordUserSuggestions = useMemo(() => {
+    if (!normalizedIncidentRecordUserSearch) {
+      return teamMembers;
+    }
+
+    return teamMembers.filter((member) =>
+      member.name.toLocaleLowerCase("es-ES").includes(normalizedIncidentRecordUserSearch),
+    );
+  }, [normalizedIncidentRecordUserSearch, teamMembers]);
 
   const getDisplayUserName = (
     userId: string,
@@ -1624,6 +1719,10 @@ const filteredRecords = useMemo(() => {
           return false;
         }
 
+        if (getDisplayTrustLevel(record) !== "REVIEW") {
+          return false;
+        }
+
         if (!isCoordinatorManagerView) {
           return true;
         }
@@ -1631,6 +1730,16 @@ const filteredRecords = useMemo(() => {
         return hasCoordinatorReviewableIncident(record.incidentFlags);
       }),
     [isCoordinatorManagerView, filteredRecords],
+  );
+  const managerIncidentJustificationsByRecordId = useMemo(
+    () =>
+      new Map(
+        pendingIncidentJustifications.map((justification) => [
+          justification.recordId,
+          justification,
+        ]),
+      ),
+    [pendingIncidentJustifications],
   );
   const filteredManagerIncidentRecords = useMemo(
     () =>
@@ -1677,6 +1786,24 @@ const filteredRecords = useMemo(() => {
           return false;
         }
 
+        if (incidentStatusFilter) {
+          const justification = managerIncidentJustificationsByRecordId.get(
+            record.id,
+          );
+          const status = justification?.status ?? "";
+
+          if (incidentStatusFilter === PENDING_ADMINISTRATION_FILTER_VALUE) {
+            if (
+              status &&
+              !matchesPendingAdministrationStatus(status)
+            ) {
+              return false;
+            }
+          } else if (status !== incidentStatusFilter) {
+            return false;
+          }
+        }
+
         return true;
       }),
     [
@@ -1685,6 +1812,8 @@ const filteredRecords = useMemo(() => {
       incidentRecordStatusFilter,
       incidentRecordTrustFilter,
       incidentRecordUserFilter,
+      incidentStatusFilter,
+      managerIncidentJustificationsByRecordId,
       normalizedIncidentRecordUserSearch,
       managerIncidentRecords,
     ],
@@ -1829,6 +1958,15 @@ const filteredRecords = useMemo(() => {
           )
         : filteredManagerIncidentRecords,
     [filteredManagerIncidentRecords, reviewModalSelectedDate],
+  );
+  const coordinatorCalendarDetailRecords = useMemo(
+    () =>
+      coordinatorCalendarDetailDate
+        ? managerIncidentRecords.filter(
+            (record) => record.workDate === coordinatorCalendarDetailDate,
+          )
+        : [],
+    [coordinatorCalendarDetailDate, managerIncidentRecords],
   );
   const todaySqlDate = getTodaySqlDate();
 
@@ -1982,6 +2120,7 @@ const filteredRecords = useMemo(() => {
         .filter(
           (record) =>
             record.status === "INCIDENT" &&
+            getDisplayTrustLevel(record) === "REVIEW" &&
             hasJustifiableIncident(record.incidentFlags) &&
             !hiddenRespondedIncidentRecordIds.has(record.id),
         )
@@ -2054,41 +2193,58 @@ const filteredRecords = useMemo(() => {
   );
 
   // --- LÓGICA DE FILTRADO PARA SOLICITUDES ---
+  const workerRequestsDateFrom = requestsDateFrom || monthRange.from;
+  const workerRequestsDateTo = requestsDateTo || monthRange.to;
 
   // 1. Filtrado para el TRABAJADOR
   const filteredWorkerRequests = useMemo(() => {
     return requests.filter((req) => {
-      if (requestsDateFrom && req.requestDate < requestsDateFrom) return false;
-      if (requestsDateTo && req.requestDate > requestsDateTo) return false;
+      if (workerRequestsDateFrom && req.requestDate < workerRequestsDateFrom)
+        return false;
+      if (workerRequestsDateTo && req.requestDate > workerRequestsDateTo)
+        return false;
       if (requestsStatusFilter && req.status !== requestsStatusFilter)
         return false;
       return true;
     });
-  }, [requests, requestsDateFrom, requestsDateTo, requestsStatusFilter]);
+  }, [
+    requests,
+    requestsStatusFilter,
+    workerRequestsDateFrom,
+    workerRequestsDateTo,
+  ]);
 
   const filteredWorkerExclusions = useMemo(() => {
     return myUnifiedExclusionRequests.filter((req) => {
-      if (requestsDateFrom && req.requestDate < requestsDateFrom) return false;
-      if (requestsDateTo && req.requestDate > requestsDateTo) return false;
+      if (workerRequestsDateFrom && req.requestDate < workerRequestsDateFrom)
+        return false;
+      if (workerRequestsDateTo && req.requestDate > workerRequestsDateTo)
+        return false;
       if (requestsStatusFilter && req.status !== requestsStatusFilter)
         return false;
       return true;
     });
   }, [
     myUnifiedExclusionRequests,
-    requestsDateFrom,
-    requestsDateTo,
     requestsStatusFilter,
+    workerRequestsDateFrom,
+    workerRequestsDateTo,
   ]);
 
   const filteredWorkerIncidents = useMemo(() => {
     return justifiableIncidentRecords.filter((record) => {
-      if (requestsDateFrom && record.workDate < requestsDateFrom) return false;
-      if (requestsDateTo && record.workDate > requestsDateTo) return false;
+      if (workerRequestsDateFrom && record.workDate < workerRequestsDateFrom)
+        return false;
+      if (workerRequestsDateTo && record.workDate > workerRequestsDateTo)
+        return false;
       // Las anomalías por justificar del trabajador no tienen estado de solicitud per se hasta que se envían
       return true;
     });
-  }, [justifiableIncidentRecords, requestsDateFrom, requestsDateTo]);
+  }, [
+    justifiableIncidentRecords,
+    workerRequestsDateFrom,
+    workerRequestsDateTo,
+  ]);
 
   // 2. Filtrado para el MANAGER
   const filteredManagerRequests = useMemo(() => {
@@ -2178,6 +2334,7 @@ const filteredRecords = useMemo(() => {
   const pendingExclusionCount = filteredManagerExclusions.length;
 
   const managerVisibleTabCount = [
+    canViewTeamRecords,
     canReviewAdjustmentRequests,
     canReviewIncidentRequests,
     canViewTeamRecords,
@@ -2190,7 +2347,9 @@ const filteredRecords = useMemo(() => {
         ? "md:grid-cols-2"
         : managerVisibleTabCount === 3
           ? "md:grid-cols-3"
-          : "md:grid-cols-4";
+          : managerVisibleTabCount === 4
+            ? "md:grid-cols-4"
+            : "md:grid-cols-5";
   const managerOverviewCardCount = [
     canReviewAdjustmentRequests,
     canReviewExclusionRequests,
@@ -2207,6 +2366,7 @@ const filteredRecords = useMemo(() => {
     if (!isManagerMode) return;
 
     const hasPermissionForTab = (tab: typeof managerReviewTab) => {
+      if (tab === "tracker") return canViewTeamRecords;
       if (tab === "records") return canViewTeamRecords;
       if (tab === "requests") return canReviewAdjustmentRequests;
       if (tab === "incidents") return canReviewIncidentRequests;
@@ -2215,7 +2375,7 @@ const filteredRecords = useMemo(() => {
     };
 
     if (!hasPermissionForTab(managerReviewTab)) {
-      if (canViewTeamRecords) setManagerReviewTab("records");
+      if (canViewTeamRecords) setManagerReviewTab("tracker");
       else if (canReviewAdjustmentRequests) setManagerReviewTab("requests");
       else if (canReviewIncidentRequests) setManagerReviewTab("incidents");
       else if (canReviewExclusionRequests) setManagerReviewTab("exclusions");
@@ -2337,6 +2497,41 @@ const filteredRecords = useMemo(() => {
       });
     } finally {
       setRequestsLoading(false);
+    }
+  };
+
+  const loadGlobalWorkerRecords = async () => {
+    if (!isWorkerMode) {
+      setGlobalWorkerRecords([]);
+      return;
+    }
+
+    try {
+      const now = new Date();
+      const dateTo = now.toISOString().slice(0, 10);
+      now.setMonth(now.getMonth() - 12);
+      const dateFrom = now.toISOString().slice(0, 10);
+      const params = new URLSearchParams({
+        dateFrom,
+        dateTo,
+        includeOpen: "1",
+      });
+      const response = await fetch(`/api/time-control/me?${params.toString()}`);
+      const data = (await response.json()) as {
+        items?: WorkdayRecord[];
+        error?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(
+          data.error ?? "No se pudieron cargar los avisos recientes.",
+        );
+      }
+
+      setGlobalWorkerRecords(data.items ?? []);
+    } catch (error) {
+      console.error("Error al cargar avisos globales del trabajador:", error);
+      setGlobalWorkerRecords([]);
     }
   };
 
@@ -2689,8 +2884,26 @@ const filteredRecords = useMemo(() => {
     if (!isWorkerMode) return;
 
     void loadRequests();
+    void loadGlobalWorkerRecords();
     void loadIncidentJustifications();
     void loadMyExclusionRequests();
+  }, [isWorkerMode]);
+
+  useEffect(() => {
+    if (!isWorkerMode) return;
+
+    const refreshWorkerNotices = () => {
+      void loadRequests();
+      void loadGlobalWorkerRecords();
+    };
+
+    window.addEventListener("focus", refreshWorkerNotices);
+    const intervalId = window.setInterval(refreshWorkerNotices, 60_000);
+
+    return () => {
+      window.removeEventListener("focus", refreshWorkerNotices);
+      window.clearInterval(intervalId);
+    };
   }, [isWorkerMode]);
 
   useEffect(() => {
@@ -2789,6 +3002,78 @@ const filteredRecords = useMemo(() => {
     });
   }, [isWorkerMode, openRecord, showWorkerOverview]);
 
+  useEffect(() => {
+    if (
+      !isWorkerMode ||
+      openWorkdayWarning ||
+      adminClosedWorkdayNotice
+    ) {
+      return;
+    }
+
+    const closedByAdminRecord = globalWorkerRecords
+      .filter((record) => record.closedByAdminAt || record.adminCloseComment)
+      .sort((left, right) =>
+        (right.closedByAdminAt ?? right.updatedAt).localeCompare(
+          left.closedByAdminAt ?? left.updatedAt,
+        ),
+      )
+      .find((record) => {
+        const storageKey = `time-control:admin-close-notice:${record.id}:${record.closedByAdminAt ?? record.updatedAt}`;
+        try {
+          return !window.localStorage.getItem(storageKey);
+        } catch {
+          return true;
+        }
+      });
+
+    if (closedByAdminRecord) {
+      setAdminClosedWorkdayNotice(closedByAdminRecord);
+    }
+  }, [
+    adminClosedWorkdayNotice,
+    globalWorkerRecords,
+    isWorkerMode,
+    openWorkdayWarning,
+  ]);
+
+  useEffect(() => {
+    if (
+      !isWorkerMode ||
+      openWorkdayWarning ||
+      adminClosedWorkdayNotice ||
+      adminReviewedRequestNotice
+    ) {
+      return;
+    }
+
+    const reviewedRequest = requests
+      .filter(
+        (request) =>
+          !request.hiddenByWorkerAt &&
+          hasAdminResponseForAdjustmentRequest(request),
+      )
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
+      .find((request) => {
+        const storageKey = `time-control:adjustment-review-notice:${request.id}:${request.status}:${request.updatedAt}`;
+        try {
+          return !window.localStorage.getItem(storageKey);
+        } catch {
+          return true;
+        }
+      });
+
+    if (reviewedRequest) {
+      setAdminReviewedRequestNotice(reviewedRequest);
+    }
+  }, [
+    adminClosedWorkdayNotice,
+    adminReviewedRequestNotice,
+    isWorkerMode,
+    openWorkdayWarning,
+    requests,
+  ]);
+
   const readApiErrorMessage = async (
     response: Response,
     fallbackMessage: string,
@@ -2876,6 +3161,45 @@ const filteredRecords = useMemo(() => {
       "/api/time-control/check-out",
       "Salida registrada correctamente.",
     );
+  };
+
+  const dismissAdminClosedWorkdayNotice = () => {
+    if (adminClosedWorkdayNotice) {
+      const storageKey = `time-control:admin-close-notice:${adminClosedWorkdayNotice.id}:${adminClosedWorkdayNotice.closedByAdminAt ?? adminClosedWorkdayNotice.updatedAt}`;
+      try {
+        window.localStorage.setItem(storageKey, "1");
+      } catch {
+        // Si localStorage falla, al menos cerramos el aviso en esta sesión.
+      }
+    }
+
+    setAdminClosedWorkdayNotice(null);
+  };
+
+  const dismissAdminReviewedRequestNotice = () => {
+    if (adminReviewedRequestNotice) {
+      const storageKey = `time-control:adjustment-review-notice:${adminReviewedRequestNotice.id}:${adminReviewedRequestNotice.status}:${adminReviewedRequestNotice.updatedAt}`;
+      try {
+        window.localStorage.setItem(storageKey, "1");
+      } catch {
+        // Si localStorage falla, cerramos el aviso igualmente en esta sesión.
+      }
+    }
+
+    setAdminReviewedRequestNotice(null);
+  };
+
+  const openAdminReviewedRequestList = () => {
+    dismissAdminReviewedRequestNotice();
+    onWorkerViewChange?.("requests");
+    setWorkerRequestsTab("requests");
+  };
+
+  const openAdminClosedWorkdayDetail = () => {
+    if (!adminClosedWorkdayNotice) return;
+    const record = adminClosedWorkdayNotice;
+    dismissAdminClosedWorkdayNotice();
+    setSelectedRecordForDetail(record);
   };
 
   const scrollToSection = (ref: { current: HTMLDivElement | null }) => {
@@ -3572,7 +3896,8 @@ const filteredRecords = useMemo(() => {
     setAdminCloseReturnRecord(record);
     setSelectedRecordForDetail(null);
     setAdminCloseCheckOutAt(
-      sqlDateTimeToDateTimeLocal(record.checkOutAt ?? record.checkInAt),
+      sqlDateTimeToDateTimeLocal(record.checkOutAt) ||
+        addHoursToSqlDateTimeLocal(record.checkInAt, 8),
     );
     setAdminCloseComment("");
   };
@@ -3694,23 +4019,60 @@ const filteredRecords = useMemo(() => {
         </div>
 
         <div className="mt-3 flex items-center justify-end gap-2.5 border-t border-sky-100/50 pt-3">
-          <button
-            type="button"
-            className={`${POPUP_DANGER_BUTTON_CLASS} cursor-pointer text-xs active:scale-95 disabled:cursor-not-allowed disabled:opacity-50`}
-            onClick={() => reviewRecordAdminValidation(record.id, "REJECTED")}
-            disabled={reviewSubmittingId === record.id}
-          >
-            Rechazar
-          </button>
-          <button
-            type="button"
-            className={`${POPUP_PRIMARY_BUTTON_CLASS} cursor-pointer text-xs active:scale-95 disabled:cursor-not-allowed disabled:opacity-50`}
-            onClick={() => reviewRecordAdminValidation(record.id, "APPROVED")}
-            disabled={reviewSubmittingId === record.id}
-          >
-            Validar
-          </button>
-        </div>
+  {/* BOTÓN RECHAZAR: Estilo "Outline Danger" coherente con Eliminar */}
+  <button
+    type="button"
+    className="group flex items-center justify-center gap-1.5 bg-white border border-red-200 text-xs font-medium text-slate-600 hover:text-slate-800 hover:bg-red-50 rounded-xl px-3 py-1.5 shadow-sm transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+    onClick={() => reviewRecordAdminValidation(record.id, "REJECTED")}
+    disabled={reviewSubmittingId === record.id}
+  >
+    {reviewSubmittingId === record.id ? (
+      <svg className="animate-spin h-3.5 w-3.5 text-red-500" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+      </svg>
+    ) : (
+      /* Icono de aspa/cruz rojo */
+      <svg
+        className="h-3.5 w-3.5 text-red-500 transition-transform duration-300 group-hover:scale-110"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+      </svg>
+    )}
+    <span>Rechazar</span>
+  </button>
+
+  {/* BOTÓN VALIDAR: Estilo "Solid Success" para guiar hacia la acción principal */}
+  <button
+    type="button"
+    className="group flex items-center justify-center gap-1.5 bg-emerald-600 border border-transparent text-xs font-medium text-white hover:bg-emerald-700 rounded-xl px-3 py-1.5 shadow-sm transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+    onClick={() => reviewRecordAdminValidation(record.id, "APPROVED")}
+    disabled={reviewSubmittingId === record.id}
+  >
+    {reviewSubmittingId === record.id ? (
+      <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+      </svg>
+    ) : (
+      /* Icono de Check (Visto bueno) */
+      <svg
+        className="h-3.5 w-3.5 text-emerald-100 transition-transform duration-300 group-hover:scale-110"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+      </svg>
+    )}
+    <span>Validar</span>
+  </button>
+</div>
       </div>
     );
   };
@@ -3720,29 +4082,47 @@ const filteredRecords = useMemo(() => {
   ) => {
     const wrapperClass =
       layout === "mobile"
-        ? "rounded-xl border border-slate-200 bg-slate-50 p-3"
+        ? "sticky bottom-3 z-20 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl shadow-slate-200/70 backdrop-blur"
         : "w-[180px] rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-sm";
     const gridClass =
       layout === "mobile" ? "grid grid-cols-3 gap-2" : "grid grid-cols-1 gap-2";
+    const actionCardClass =
+      layout === "mobile"
+        ? "flex min-h-[86px] flex-col items-center justify-between gap-2 rounded-2xl border border-slate-100 bg-white p-3 text-center shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md active:scale-[0.98]"
+        : "flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md";
+    const actionTextClass =
+      layout === "mobile" ? "space-y-0.5" : "flex-1 space-y-0.5 pr-4";
+    const actionTitleClass =
+      layout === "mobile"
+        ? "text-[11px] font-semibold leading-tight text-slate-900"
+        : "text-sm font-semibold text-slate-900";
+    const primaryActionTitleClass =
+      layout === "mobile"
+        ? "text-[11px] font-semibold leading-tight text-slate-900"
+        : "text-sm font-semibold text-slate-900";
+    const checkoutActionTitleClass =
+      layout === "mobile"
+        ? "text-[11px] font-semibold leading-tight text-rose-700"
+        : "text-sm font-semibold text-rose-700";
 
     return (
 <div className={wrapperClass}>
         {/* Cabecera de la sección respetando tu posición */}
-        <p className="mb-3 px-1 text-xs font-bold uppercase tracking-wider text-slate-400">
+        <p className="mb-2 px-1 text-xs font-bold uppercase tracking-wider text-slate-400">
           Acciones rápidas
         </p>
 
         {/* Contenedor dispuesto en vertical pura */}
-        <div className="flex flex-col gap-3">
+        <div className={layout === "mobile" ? gridClass : "flex flex-col gap-3"}>
           
           {/* TARJETA 1: Fichar Entrada / Salida */}
           {isWorkerMode && (
             !openRecord ? (
               /* Estado: Iniciar Jornada */
-              <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md">
+              <div className={actionCardClass}>
                 {/* AÑADIDO flex-1 y pr-4. ELIMINADO max-w-[200px] */}
-                <div className="flex-1 space-y-0.5 pr-4">
-                  <h3 className="text-sm font-semibold text-slate-900">
+                <div className={actionTextClass}>
+                  <h3 className={primaryActionTitleClass}>
                     Iniciar Jornada
                   </h3>
                   
@@ -3764,10 +4144,10 @@ const filteredRecords = useMemo(() => {
               </div>
             ) : (
               /* Estado: Finalizar Jornada */
-              <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md">
+              <div className={actionCardClass}>
                 {/* AÑADIDO flex-1 y pr-4. ELIMINADO max-w-[200px] */}
-                <div className="flex-1 space-y-0.5 pr-4">
-                  <h3 className="text-sm font-semibold text-rose-700">
+                <div className={actionTextClass}>
+                  <h3 className={checkoutActionTitleClass}>
                     Finalizar Jornada
                   </h3>
                   
@@ -3791,10 +4171,10 @@ const filteredRecords = useMemo(() => {
           )}
 
           {/* TARJETA 2: Solicitar Fichaje */}
-          <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md">
+          <div className={actionCardClass}>
             {/* AÑADIDO flex-1 y pr-4. ELIMINADO max-w-[200px] */}
-            <div className="flex-1 space-y-0.5 pr-4">
-              <h3 className="text-sm font-semibold text-slate-900">
+            <div className={actionTextClass}>
+              <h3 className={actionTitleClass}>
                 Solicitar Fichaje
               </h3>
               
@@ -3808,10 +4188,10 @@ const filteredRecords = useMemo(() => {
           </div>
 
           {/* TARJETA 3: Ayuda Ubicación */}
-          <div className="flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md">
+          <div className={actionCardClass}>
             {/* AÑADIDO flex-1 y pr-4. ELIMINADO max-w-[200px] */}
-            <div className="flex-1 space-y-0.5 pr-4">
-              <h3 className="text-sm font-semibold text-slate-900">
+            <div className={actionTextClass}>
+              <h3 className={actionTitleClass}>
                 Ayuda Ubicación
               </h3>
               
@@ -3821,7 +4201,7 @@ const filteredRecords = useMemo(() => {
               onClick={() => setShowLocationHelp(true)}
               disabled={submitting}
             >
-              <i className="ti ti-map-pin text-[18px]" aria-hidden="true" />
+              <i className="ti ti-help text-[18px]" aria-hidden="true" />
             </button>
           </div>
 
@@ -3836,6 +4216,7 @@ const filteredRecords = useMemo(() => {
     const trustClass = TRUST_LEVEL_CLASSES[trustLevel];
     const hasIncident = record.status === "INCIDENT";
     const displayStatus = STATUS_LABELS[getDisplayRecordStatus(record)];
+    const reviewDetailItems = getStatusDetailItems(record);
     const expectedMinutes = 480;
     const workedPercent = Math.min(
       100,
@@ -3845,6 +4226,83 @@ const filteredRecords = useMemo(() => {
     const getMapsUrl = (lat: number | null, lng: number | null): string => {
       if (lat === null || lng === null) return "";
       return `https://www.google.com/maps/search/?api=1&query=${lat},${lng}`;
+    };
+
+    const renderTechnicalData = (
+      ipAddress: string | null,
+      latitude: number | null,
+      longitude: number | null,
+    ) => (
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-white/95 p-3 text-xs text-slate-600 shadow-xl">
+        <p>
+          <span className="font-semibold text-slate-700">IP:</span>{" "}
+          {ipAddress || "—"}
+        </p>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="font-semibold text-slate-700">Ubicación:</span>
+          {latitude !== null && longitude !== null ? (
+            <a
+              href={getMapsUrl(latitude, longitude)}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
+            >
+              <svg
+                className="mr-1 h-3.5 w-3.5 shrink-0 text-slate-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
+                />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+              </svg>
+              {latitude.toFixed(6)}, {longitude.toFixed(6)}
+            </a>
+          ) : (
+            <span className="text-slate-400">—</span>
+          )}
+        </div>
+      </div>
+    );
+
+    const renderTechnicalHover = (
+      label: string,
+      time: string,
+      tone: "emerald" | "sky",
+      ipAddress: string | null,
+      latitude: number | null,
+      longitude: number | null,
+    ) => {
+      const toneClasses =
+        tone === "emerald"
+          ? "border-emerald-200 text-emerald-700 group-hover:border-emerald-300"
+          : "border-sky-200 text-sky-700 group-hover:border-sky-300";
+      const iconClass =
+        tone === "emerald" ? "text-emerald-500" : "text-sky-500";
+
+      return (
+        <span className="group relative inline-flex">
+          <span
+            className={`inline-flex items-center gap-1.5 rounded-xl border bg-white px-3 py-1.5 font-mono text-base font-bold shadow-sm transition ${toneClasses}`}
+          >
+            {time}
+            <i className={`ti ti-info-circle text-[14px] ${iconClass}`} aria-hidden="true" />
+          </span>
+          <span className="absolute left-0 top-full z-50 hidden w-72 pt-2 group-hover:block">
+            {renderTechnicalData(ipAddress, latitude, longitude)}
+          </span>
+        </span>
+      );
     };
 
     if (isCoordinatorManagerView) {
@@ -3861,7 +4319,7 @@ const filteredRecords = useMemo(() => {
                 </h4>
               </div>
               <span
-                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${CALENDAR_STATUS_BADGE_CLASSES[getDisplayRecordStatus(record)]}`}
+                className={`${SOFT_STATUS_CHIP_CLASS} ${CALENDAR_STATUS_BADGE_CLASSES[getDisplayRecordStatus(record)]}`}
               >
                 {displayStatus}
               </span>
@@ -3902,9 +4360,9 @@ const filteredRecords = useMemo(() => {
             </div>
           </div>
 
-          <div className="flex items-start rounded-2xl border border-amber-100 bg-amber-50/40 p-4">
+          <div className="flex items-start rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
             <svg
-              className="mr-3 mt-0.5 h-5 w-5 shrink-0 text-amber-500"
+              className="mr-3 mt-0.5 h-4 w-4 shrink-0 text-sky-500"
               fill="none"
               stroke="currentColor"
               viewBox="0 0 24 24"
@@ -3917,10 +4375,10 @@ const filteredRecords = useMemo(() => {
               />
             </svg>
             <div>
-              <h6 className="text-xs font-bold uppercase tracking-wider text-amber-700">
+              <h6 className="text-xs font-semibold text-sky-700">
                 Detalle horario revisable
               </h6>
-              <p className="mt-1 text-sm font-medium leading-relaxed text-amber-900">
+              <p className="mt-2 inline-flex rounded-full border border-sky-200 bg-white px-3 py-1.5 text-xs font-medium leading-5 text-sky-700 shadow-sm">
                 {getCoordinatorIncidentDetail(record)}
               </p>
             </div>
@@ -3932,8 +4390,9 @@ const filteredRecords = useMemo(() => {
     return (
       
       <div className="space-y-5 text-left">
-        <div className="relative overflow-hidden rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white p-5 shadow-sm">
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-3">
+        <div className={`${isManagerMode && isFunctionalAdmin ? "grid gap-4 lg:grid-cols-[minmax(0,1.3fr)_minmax(280px,0.7fr)]" : ""}`}>
+        <div className="relative overflow-visible rounded-2xl border border-slate-100 bg-gradient-to-br from-slate-50 to-white p-5 shadow-sm">
+          <div className={`${isManagerMode && isFunctionalAdmin ? "grid gap-4 md:grid-cols-[1fr_auto]" : "flex flex-wrap items-center justify-between gap-3"} border-b border-slate-100 pb-3`}>
             <div>
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                 Fecha de jornada
@@ -3942,31 +4401,33 @@ const filteredRecords = useMemo(() => {
                 {formatShortDate(record.workDate)}
               </h4>
             </div>
-            <div className="flex items-center gap-1.5 font-sans">
+            <div className="flex flex-wrap items-center gap-1.5 font-sans md:justify-end">
               <span
                 className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${CALENDAR_STATUS_BADGE_CLASSES[getDisplayRecordStatus(record)]}`}
               >
                 {displayStatus}
               </span>
-              <span
-                className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${trustClass}`}
-                title={getTrustTooltip(record)}
-              >
-                <svg
-                  className="mr-1 h-3 w-3"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
+              {!isWorkerMode ? (
+                <span
+                  className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold tracking-wide ${trustClass}`}
+                  title={getTrustTooltip(record)}
                 >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth="2.5"
-                    d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
-                  />
-                </svg>
-                {trustLabel}
-              </span>
+                  <svg
+                    className="mr-1 h-3 w-3"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth="2.5"
+                      d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"
+                    />
+                  </svg>
+                  {trustLabel}
+                </span>
+              ) : null}
             </div>
           </div>
 
@@ -3989,9 +4450,37 @@ const filteredRecords = useMemo(() => {
                     d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                <span className="font-mono text-xl font-bold tracking-tight text-slate-800">
-                  {getRecordLine(record)}
-                </span>
+                {isManagerMode && isFunctionalAdmin ? (
+                  <span className="flex flex-wrap items-center gap-2">
+                    {renderTechnicalHover(
+                      "Entrada",
+                      formatTimeOnly(record.checkInAt),
+                      "emerald",
+                      record.checkInIpAddress,
+                      record.checkInLatitude,
+                      record.checkInLongitude,
+                    )}
+                    <span className="font-mono text-lg font-bold text-slate-400">-</span>
+                    {record.checkOutAt ? (
+                      renderTechnicalHover(
+                        "Salida",
+                        formatTimeOnly(record.checkOutAt),
+                        "sky",
+                        record.checkOutIpAddress,
+                        record.checkOutLatitude,
+                        record.checkOutLongitude,
+                      )
+                    ) : (
+                      <span className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-mono text-base font-bold text-slate-500 shadow-sm">
+                        Sin salida
+                      </span>
+                    )}
+                  </span>
+                ) : (
+                  <span className="font-mono text-xl font-bold tracking-tight text-slate-800">
+                    {getRecordLine(record)}
+                  </span>
+                )}
               </div>
             </div>
             <div className="shrink-0 sm:text-right">
@@ -4014,11 +4503,11 @@ const filteredRecords = useMemo(() => {
             <div className="relative h-2.5 w-full overflow-hidden rounded-full bg-slate-100 shadow-inner">
               <div
                 className={`h-full rounded-full transition-all duration-500 bg-gradient-to-r ${
-                  record.status === "INCIDENT"
-                    ? "from-rose-400 to-rose-500 shadow-[0_0_8px_rgba(244,63,94,0.3)]"
-                    : record.status === "COMPLETED"
+                  trustLevel === "CORRECT"
                       ? "from-emerald-400 to-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.3)]"
-                      : "from-sky-400 to-sky-500 shadow-[0_0_8px_rgba(56,189,248,0.3)]"
+                    : record.status === "OPEN"
+                      ? "from-amber-400 to-amber-500 shadow-[0_0_8px_rgba(245,158,11,0.3)]"
+                    : "from-sky-400 to-sky-500 shadow-[0_0_8px_rgba(56,189,248,0.3)]"
                 }`}
                 style={{ width: `${workedPercent}%` }}
               />
@@ -4027,16 +4516,65 @@ const filteredRecords = useMemo(() => {
 
           {isManagerMode && isFunctionalAdmin && record.status === "OPEN" ? (
             <div className="mt-4 flex justify-end border-t border-slate-100 pt-4">
-              <button
-                type="button"
-                className={`${POPUP_PRIMARY_BUTTON_CLASS} inline-flex items-center gap-2 text-xs`}
-                onClick={() => openAdminCloseModal(record)}
-              >
-                <i className="ti ti-lock-check text-[15px]" aria-hidden="true" />
-                Cerrar jornada
-              </button>
-            </div>
+  <button
+    type="button"
+    className="group inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl px-3.5 py-2 shadow-sm transition-all duration-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+    onClick={() => openAdminCloseModal(record)}
+  >
+    <svg
+      className="h-3.5 w-3.5 text-blue-100 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+      <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 14.25l1.5 1.5 3-3" />
+    </svg>
+    <span>Cerrar jornada</span>
+  </button>
+</div>
           ) : null}
+        </div>
+
+        {isManagerMode && isFunctionalAdmin ? (
+          <div className="flex min-h-full items-start rounded-2xl border border-sky-100 bg-sky-50/50 p-5 shadow-sm">
+            <svg
+              className="mr-3 mt-0.5 h-5 w-5 shrink-0 text-sky-500"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth="2"
+                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+              />
+            </svg>
+            <div className="min-w-0">
+              <h6 className="text-xs font-bold uppercase tracking-wider text-sky-700">
+                Motivos de revisión
+              </h6>
+              {hasIncident && trustLevel === "REVIEW" && reviewDetailItems.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {reviewDetailItems.map((item) => (
+                    <span
+                      key={`${record.id}-admin-side-detail-${item}`}
+                      className={`inline-flex rounded-full border bg-white px-3 py-1.5 text-xs font-semibold leading-5 shadow-sm ${getStatusDetailItemOnWhiteClass(record)}`}
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-3 text-sm leading-6 text-slate-500">
+                  No hay motivos pendientes de revisión.
+                </p>
+              )}
+            </div>
+          </div>
+        ) : null}
         </div>
 
         {record.adminCloseComment || record.closedByAdminAt ? (
@@ -4063,6 +4601,9 @@ const filteredRecords = useMemo(() => {
           </div>
         ) : null}
 
+        
+
+        {!isManagerMode || !isFunctionalAdmin ? (
         <div className="space-y-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
           <div className="flex items-center justify-between gap-3">
             <h5 className="text-xs font-bold uppercase tracking-widest text-slate-400">
@@ -4223,39 +4764,9 @@ const filteredRecords = useMemo(() => {
             </div>
           </div>
         </div>
+        ) : null}
 
-        {hasIncident && (
-          <div className="flex items-start rounded-2xl border border-sky-100 bg-sky-50/50 p-4">
-            <svg
-              className="mr-3 mt-0.5 h-5 w-5 shrink-0 text-sky-500"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth="2"
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-              />
-            </svg>
-            <div>
-              <h6 className="text-xs font-bold uppercase tracking-wider text-sky-700">
-                Motivos de revisión
-              </h6>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {getStatusDetailItems(record).map((item) => (
-                  <span
-                    key={`${record.id}-detail-${item}`}
-                    className={`inline-flex rounded-full border bg-white px-3 py-1.5 text-xs font-semibold leading-5 shadow-sm ${getStatusDetailItemOnWhiteClass(record)}`}
-                  >
-                    {item}
-                  </span>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
+        
 
         {renderRecordAdminValidationPanel(record)}
       </div>
@@ -4289,6 +4800,116 @@ const filteredRecords = useMemo(() => {
     workerCalendarTouchStartXRef.current = null;
   };
 
+  const renderManagerReviewMenu = () => (
+    <div className="rounded-2xl border border-slate-200 bg-white p-1.5 shadow-sm">
+      <div className={`grid gap-1 ${managerMenuColsClass}`}>
+        {canViewTeamRecords ? (
+          <button
+            type="button"
+            onClick={() => handleTabClick("tracker")}
+            className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
+              managerReviewTab === "tracker"
+                ? "bg-slate-900 text-white shadow-sm"
+                : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            Cuadrante
+          </button>
+        ) : null}
+
+        {canViewTeamRecords ? (
+          <button
+            type="button"
+            onClick={() => handleTabClick("records")}
+            className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
+              managerReviewTab === "records"
+                ? "bg-slate-900 text-white shadow-sm"
+                : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            Fichajes
+          </button>
+        ) : null}
+
+        {canReviewAdjustmentRequests ? (
+          <button
+            type="button"
+            onClick={() => handleTabClick("requests")}
+            className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
+              managerReviewTab === "requests"
+                ? "bg-slate-900 text-white shadow-sm"
+                : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            Solicitudes
+            {!viewedTabs.includes("requests") && pendingRequests.length > 0 ? (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs transition-opacity duration-300 ${
+                  managerReviewTab === "requests"
+                    ? "bg-white/20 text-white"
+                    : "bg-rose-100 text-rose-600"
+                }`}
+              >
+                {pendingRequests.length}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
+
+        {canReviewIncidentRequests ? (
+          <button
+            type="button"
+            onClick={() => handleTabClick("incidents")}
+            className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
+              managerReviewTab === "incidents"
+                ? "bg-slate-900 text-white shadow-sm"
+                : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            {isCoordinatorManagerView ? "Revisión horaria" : "Revisión"}
+            {!viewedTabs.includes("incidents") &&
+            pendingIncidentJustifications.length > 0 ? (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs transition-opacity duration-300 ${
+                  managerReviewTab === "incidents"
+                    ? "bg-white/20 text-white"
+                    : "bg-rose-100 text-rose-600"
+                }`}
+              >
+                {pendingIncidentJustifications.length}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
+
+        {canReviewExclusionRequests ? (
+          <button
+            type="button"
+            onClick={() => handleTabClick("exclusions")}
+            className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
+              managerReviewTab === "exclusions"
+                ? "bg-slate-900 text-white shadow-sm"
+                : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+            }`}
+          >
+            Permisos
+            {!viewedTabs.includes("exclusions") && pendingExclusionCount > 0 ? (
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs transition-opacity duration-300 ${
+                  managerReviewTab === "exclusions"
+                    ? "bg-white/20 text-white"
+                    : "bg-rose-100 text-rose-600"
+                }`}
+              >
+                {pendingExclusionCount}
+              </span>
+            ) : null}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+
   return (
     <>
       {/* Tracker slot tooltip */}
@@ -4297,7 +4918,6 @@ const filteredRecords = useMemo(() => {
         const checkIn = formatTimeOnly(rec.checkInAt);
         const checkOut = rec.checkOutAt ? formatTimeOnly(rec.checkOutAt) : "en curso";
         const status = getDisplayRecordStatus(rec);
-        const flags = rec.incidentFlags ?? [];
         const statusLabel = STATUS_LABELS[status];
         const statusColor =
           status === "INCIDENT"
@@ -4324,13 +4944,6 @@ const filteredRecords = useMemo(() => {
             <p className="font-semibold text-slate-800 mb-1">{trackerTooltip.member.name}</p>
             <p className="text-slate-500 text-xs mb-1">{checkIn} → {checkOut}</p>
             <p className={`font-semibold text-xs ${statusColor}`}>{statusLabel}</p>
-            {flags.length > 0 && (
-              <ul className="mt-1.5 border-t border-slate-100 pt-1.5 space-y-0.5">
-                {flags.map((f) => (
-                  <li key={f} className="text-slate-500 text-xs">{getIncidentFlagMessage(f)}</li>
-                ))}
-              </ul>
-            )}
           </div>
         );
       })()}
@@ -4351,18 +4964,18 @@ const filteredRecords = useMemo(() => {
       <section
         className={`relative ${showWorkerOverview ? "flex flex-col gap-6 xl:flex-row xl:items-start" : "space-y-4"}`}
       >
-        <div className="flex-1 min-w-0 space-y-4 overflow-visible">
+        <div className={`flex-1 min-w-0 space-y-4 overflow-visible ${showWorkerOverview ? "pb-24 xl:pb-0" : ""}`}>
           {headerSlot ? (
             <div className="relative">
               <div className="min-w-0">{headerSlot}</div>
               {showWorkerOverview ? (
-                <div className="hidden xl:block absolute top-2 -right-48 z-10">
+                <div className="hidden min-[1800px]:block absolute top-2 -right-48 z-10">
                   {renderQuickActionsCard("desktop")}
                 </div>
               ) : null}
             </div>
           ) : showWorkerOverview ? (
-            <div className="hidden xl:flex justify-end">
+            <div className="hidden min-[1800px]:flex justify-end">
               {renderQuickActionsCard("desktop")}
             </div>
           ) : null}
@@ -4372,7 +4985,7 @@ const filteredRecords = useMemo(() => {
                 <>
                   <div className="flex flex-col sm:flex-row items-stretch gap-4 mb-6 w-full">
                     {/* TARJETA: ESTADO DE HOY */}
-                    <div className="relative flex-1 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all hover:shadow-md flex flex-col justify-between">
+                    <div className="relative flex-1 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all hover:shadow-md flex flex-col justify-between sm:p-5">
                       <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
@@ -4443,7 +5056,7 @@ const filteredRecords = useMemo(() => {
                     </div>
 
                     {/* TARJETA: HORAS TOTALES */}
-                    <div className="relative flex-1 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm transition-all hover:shadow-md flex flex-col justify-between">
+                    <div className="relative flex-1 rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all hover:shadow-md flex flex-col justify-between sm:p-5">
                       <div className="flex items-center justify-between gap-4">
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">
@@ -4476,12 +5089,12 @@ const filteredRecords = useMemo(() => {
                     </div>
                   </div>
                   <div className="space-y-4">
-                    {/* Acciones rápidas - SOLO MÓVIL (hasta 1280px) */}
-                    <div className="xl:hidden">
+                    {/* Acciones rápidas - móvil, tablet y portátil */}
+                    <div className="min-[1800px]:hidden">
                       {renderQuickActionsCard("mobile")}
                     </div>
 
-                    <div className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
                       <div className="border-t border-slate-100 pt-5">
                         <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
                           <div className="space-y-1">
@@ -4828,6 +5441,11 @@ const filteredRecords = useMemo(() => {
                           Aquí puedes ver las anomalías que admiten
                           justificación y enviarla para revisión.
                         </p>
+                        <p className="text-xs leading-5 text-slate-500">
+                          Justifica solo los casos en los que puedas explicar
+                          una diferencia horaria, como una jornada más corta,
+                          más larga o fuera del horario previsto.
+                        </p>
                       </div>
 
                       {loading || incidentJustificationsLoading ? (
@@ -4858,13 +5476,14 @@ const filteredRecords = useMemo(() => {
                               }
                             />
                             <div className="flex items-end">
-                              <Button
-                              variant="secondary"
-                              className="bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 rounded-xl px-4 py-2 shadow-sm transition-all"
-                              onClick={clearRequestFilters}
-                            >
-                              Limpiar
-                            </Button>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
+                                onClick={clearRequestFilters}
+                              >
+                                <i className="ti ti-brush" style={{ fontSize: "16px" }} aria-hidden="true"></i>
+                                <span>Limpiar filtros</span>
+                              </button>
                             </div>
                           </div>
 
@@ -4887,6 +5506,10 @@ const filteredRecords = useMemo(() => {
                                   justification?.adminComment ??
                                   justification?.coordinatorComment ??
                                   null;
+                                const justifiableDetailItems =
+                                  getJustifiableIncidentDetailItems(
+                                    record.incidentFlags,
+                                  );
 
                                 return (
                                   <div
@@ -4894,89 +5517,113 @@ const filteredRecords = useMemo(() => {
                                     className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm sm:p-5"
                                   >
                                     <div className="space-y-4">
-                                      <div className="flex flex-wrap items-start justify-between gap-3">
-                                        <div className="space-y-3">
-                                          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
-                                            <span className="font-medium text-slate-900">
-                                            {formatShortDate(record.workDate)}
-                                            </span>
-                                            <span className="text-slate-300">•</span>
-                                            <span className="text-slate-700">
-                                              {getRecordLine(record)}
-                                            </span>
-                                          </div>
+  <div className="flex flex-wrap items-start justify-between gap-3">
+    
+    {/* COLUMNA IZQUIERDA: Información, Estados y Botón Ver Detalle */}
+    <div className="space-y-3 flex-1 min-w-[240px]">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
+        <span className="font-medium text-slate-900">
+          {formatShortDate(record.workDate)}
+        </span>
+        <span className="text-slate-300">•</span>
+        <span className="text-slate-700">
+          {getRecordLine(record)}
+        </span>
+      </div>
 
-                                          <div className="flex flex-wrap gap-2">
-                                            <span
-                                              className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${CALENDAR_STATUS_BADGE_CLASSES[getDisplayRecordStatus(record)]}`}
-                                            >
-                                              {
-                                                STATUS_LABELS[
-                                                  getDisplayRecordStatus(record)
-                                                ]
-                                              }
-                                            </span>
-                                            {justification ? (
-                                              <span
-                                                className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${INCIDENT_JUSTIFICATION_STATUS_CLASSES[justification.status]}`}
-                                              >
-                                                {
-                                                  INCIDENT_JUSTIFICATION_STATUS_LABELS[
-                                                    justification.status
-                                                  ]
-                                                }
-                                              </span>
-                                            ) : null}
-                                          </div>
+      <div className="flex flex-wrap gap-2">
+  <span className={`${SOFT_STATUS_CHIP_CLASS} ${CALENDAR_STATUS_BADGE_CLASSES[getDisplayRecordStatus(record)]}`}>
+    {STATUS_LABELS[getDisplayRecordStatus(record)]}
+  </span>
+  {justification ? (
+    <span className={`${SOFT_STATUS_CHIP_CLASS} ${INCIDENT_JUSTIFICATION_STATUS_CLASSES[justification.status]}`}>
+      {INCIDENT_JUSTIFICATION_STATUS_LABELS[justification.status]}
+    </span>
+  ) : (
+    <span className={`${SOFT_STATUS_CHIP_CLASS} border-orange-200 bg-orange-50 text-orange-700`}>
+      Pendiente de justificar
+    </span>
+  )}
+</div>
 
-                                          <div className="flex flex-wrap gap-2">
-                                            {getStatusDetailItems(record).map((item) => (
-                                              <span
-                                                key={`${record.id}-${item}`}
-                                                className={`inline-flex rounded-full border bg-white px-3 py-1.5 text-[11px] font-medium leading-5 shadow-sm ${getStatusDetailItemOnWhiteClass(record)}`}
-                                              >
-                                                {item}
-                                              </span>
-                                            ))}
-                                          </div>
-                                        </div>
+      <div className="flex flex-wrap gap-2">
+        {(justifiableDetailItems.length > 0
+          ? justifiableDetailItems
+          : ["Anomalía justificable"]
+        ).map((item) => (
+          <span
+            key={`${record.id}-${item}`}
+            className={`inline-flex rounded-full border bg-white px-3 py-1.5 text-[11px] font-medium leading-5 shadow-sm ${getStatusDetailItemOnWhiteClass(record)}`}
+          >
+            {item}
+          </span>
+        ))}
+      </div>
+      
+      {!justification ? (
+        <p className="max-w-2xl text-xs leading-5 text-slate-500">
+          Puedes enviar una explicación para que administración revise esta diferencia horaria.
+        </p>
+      ) : null}
 
-                                        {justification &&
-                                        hasAdminResponseForIncidentJustification(
-                                          justification,
-                                        ) ? (
-                                          <button
-                                            type="button"
-                                            className="inline-flex h-8 w-8 shrink-0 items-center justify-center self-start rounded-full border border-slate-200 bg-white text-base font-semibold leading-none text-slate-500 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
-                                            onClick={() =>
-                                              setIncidentJustificationToDelete(
-                                                justification,
-                                              )
-                                            }
-                                            aria-label="Eliminar justificación aprobada"
-                                            title="Eliminar justificación aprobada"
-                                          >
-                                            ×
-                                          </button>
-                                        ) : justification ? null : (
-                                          <div className="self-start">
-                                            <Button
-                                              disabled={
-                                                incidentJustificationSubmitting
-                                              }
-                                              onClick={() => {
-                                                setSelectedIncidentRecordId(
-                                                  record.id,
-                                                );
-                                                setIncidentJustificationReason("");
-                                              }}
-                                            >
-                                              Justificar
-                                            </Button>
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
+      {/* BOTÓN: Ver detalle (Naranja, icono a la derecha y animación sutil hacia arriba) */}
+      <div className="pt-1">
+        <button
+          type="button"
+          onClick={() => setSelectedRecordForDetail(record)}
+          className={DETAIL_ACTION_BUTTON_CLASS}
+        >
+          <span>Ver detalle</span>
+          <i 
+            className={DETAIL_ACTION_ICON_CLASS}
+            aria-hidden="true"
+          ></i>
+        </button>
+      </div>
+    </div>
+
+    {/* COLUMNA DERECHA: Acciones de Justificación */}
+    <div className="flex items-center gap-2 self-start shrink-0">
+      {justification && hasAdminResponseForIncidentJustification(justification) ? (
+        <button
+          type="button"
+          onClick={() => setIncidentJustificationToDelete(justification)}
+          className="inline-flex h-8 w-8 items-center justify-center rounded-xl border border-slate-200 bg-white text-base font-semibold leading-none text-slate-500 shadow-sm transition-all duration-300 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 active:scale-95"
+          aria-label="Eliminar justificación aprobada"
+          title="Eliminar justificación aprobada"
+        >
+          ×
+        </button>
+      ) : justification ? null : (
+        <button
+          type="button"
+          disabled={incidentJustificationSubmitting}
+          onClick={() => {
+            setSelectedIncidentRecordId(record.id);
+            setIncidentJustificationReason("");
+          }}
+          className="group flex h-8 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-white px-3.5 text-xs font-semibold text-sky-700 shadow-sm transition-all duration-300 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg
+            className="h-3.5 w-3.5 text-sky-600 transition-transform duration-300 group-hover:scale-110"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"
+            />
+          </svg>
+          <span>Justificar</span>
+        </button>
+      )}
+    </div>
+
+  </div>
+</div>
 
                                     {justification ? (
                                       <div className="mt-5 grid gap-3 text-sm text-slate-700 md:grid-cols-2">
@@ -5139,13 +5786,14 @@ const filteredRecords = useMemo(() => {
                               ]}
                             />
                             <div className="flex items-end">
-                              <Button
-                              variant="secondary"
-                              className="bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 rounded-xl px-4 py-2 shadow-sm transition-all"
-                              onClick={clearRequestFilters}
-                            >
-                              Limpiar
-                            </Button>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
+                                onClick={clearRequestFilters}
+                              >
+                                <i className="ti ti-brush" style={{ fontSize: "16px" }} aria-hidden="true"></i>
+                                <span>Limpiar filtros</span>
+                              </button>
                             </div>
                           </div>
 
@@ -5419,623 +6067,360 @@ const filteredRecords = useMemo(() => {
                       Vista de Coordinación
                     </span>
                     <p>
-                      Aquí solo verás registros horarios por validar de los trabajadores de tu ámbito.
+                      Aquí solo verás registros con desajustes horarios de los trabajadores de tu ámbito.
                     </p>
                   </div>
                 ) : null}
-                <div className={`grid gap-4 ${managerOverviewColsClass}`}>
-                  {/* 1. SOLICITUDES PENDIENTES */}
-                  {canReviewAdjustmentRequests ? (
-                    
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleTabClick("requests");
-                        scrollToSection(pendingRequestsSectionRef);
-                      }}
-                      className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-indigo-300 hover:shadow-md active:scale-[0.98]"
-                    >
-                      <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
+                <div className={`grid gap-3 ${managerOverviewColsClass}`}>
+  {/* 1. SOLICITUDES PENDIENTES */}
+  {canReviewAdjustmentRequests ? (
+    <button
+      type="button"
+      onClick={() => {
+        handleTabClick("requests");
+        scrollToSection(pendingRequestsSectionRef);
+      }}
+      className="group flex min-h-[74px] items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all hover:border-indigo-300 hover:shadow-md active:scale-[0.98]"
+    >
+      <div className="flex items-center gap-3 overflow-hidden">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 transition-colors group-hover:bg-indigo-100">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-4.5 w-4.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z" />
+          </svg>
+        </div>
+        <div className="flex flex-col items-start text-left">
+          <h3 className="text-sm font-bold text-slate-900 leading-tight">Solicitudes</h3>
+          <p className="mt-1 text-[11px] text-slate-500 leading-tight truncate">
+            {managerPendingCount === 0 ? "Al día" : "Acción necesaria"}
+          </p>
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 pl-2">
+        <span className="text-xl font-black text-slate-900">{managerPendingCount}</span>
+        <span className="text-indigo-600 transition-transform group-hover:translate-x-0.5">
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+        </span>
+      </div>
+    </button>
+  ) : null}
 
-                      <div className="relative flex h-full flex-col">
-                        <div className="flex items-center justify-between">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-50 text-indigo-600 transition-colors group-hover:bg-indigo-100">
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              strokeWidth={2}
-                              stroke="currentColor"
-                              className="h-5 w-5"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M9 12h3.75M9 15h3.75M9 18h3.75m3 .75H18a2.25 2.25 0 002.25-2.25V6.108c0-1.135-.845-2.098-1.976-2.192a48.424 48.424 0 00-1.123-.08m-5.801 0c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m0 0H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V9.375c0-.621-.504-1.125-1.125-1.125H8.25zM6.75 12h.008v.008H6.75V12zm0 3h.008v.008H6.75V15zm0 3h.008v.008H6.75V18z"
-                              />
-                            </svg>
-                          </div>
-                          <span className="text-3xl font-black tracking-tight text-slate-900">
-                            {managerPendingCount}
-                          </span>
-                        </div>
+  {/* 2. TELETRABAJO Y PERMISOS */}
+  {canReviewExclusionRequests ? (
+    <button
+      type="button"
+      onClick={() => {
+        handleTabClick("exclusions");
+        scrollToSection(pendingRequestsSectionRef);
+      }}
+      className="group flex min-h-[74px] items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all hover:border-sky-300 hover:shadow-md active:scale-[0.98]"
+    >
+      <div className="flex items-center gap-3 overflow-hidden">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-sky-50 text-sky-600 transition-colors group-hover:bg-sky-100">
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-4.5 w-4.5">
+            <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25" />
+          </svg>
+        </div>
+        <div className="flex flex-col items-start text-left">
+          <h3 className="text-sm font-bold text-slate-900 leading-tight">Permisos</h3>
+          <p className="mt-1 text-[11px] text-slate-500 leading-tight truncate">Gestión de ausencias</p>
+        </div>
+      </div>
+      <div className="flex items-center gap-1.5 pl-2">
+        <span className="text-xl font-black text-slate-900">{pendingExclusionCount}</span>
+        <span className="text-sky-600 transition-transform group-hover:translate-x-0.5">
+          <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+        </span>
+      </div>
+    </button>
+  ) : null}
 
-                        <div className="mt-5">
-                          <h3 className="text-base font-bold text-slate-900">
-                            Solicitudes pendientes
-                          </h3>
-                          <p className="mt-1 text-xs text-slate-500">
-                            {managerPendingCount === 0
-                              ? "Todo al día."
-                              : "Requieren tu aprobación inmediata."}
-                          </p>
-                        </div>
+  {/* 3. ANOMALÍAS DEL EQUIPO */}
+  <button
+    type="button"
+    onClick={() => {
+      setReviewModalMonth(
+        reviewModalSelectedDate?.slice(0, 7) ??
+          filteredManagerIncidentRecords[0]?.workDate.slice(0, 7) ??
+          trackerDate.slice(0, 7)
+      );
+      setShowManagerIncidentsModal(true);
+    }}
+    className="group flex min-h-[74px] items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all hover:border-orange-300 hover:shadow-md active:scale-[0.98]"
+  >
+    <div className="flex items-center gap-3 overflow-hidden">
+      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-50 text-orange-600 transition-colors group-hover:bg-orange-100">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" className="h-4.5 w-4.5">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M12 8.75v3.35m-6.928 6.9h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      </div>
+      <div className="flex flex-col items-start text-left">
+        <h3 className="text-sm font-bold text-slate-900 leading-tight">
+          {isCoordinatorManagerView ? "Desajustes" : "Fichajes"}
+        </h3>
+        <p className="mt-1 text-[11px] text-slate-500 leading-tight truncate">
+          <span className="font-semibold text-orange-600">{managerIncidentUsersCount}</span> afectados
+        </p>
+      </div>
+    </div>
+    <div className="flex items-center gap-1.5 pl-2">
+      <span className="text-xl font-black text-slate-900">{managerIncidentRecords.length}</span>
+      <span className="text-orange-600 transition-transform group-hover:translate-x-0.5">
+        <svg className="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+      </span>
+    </div>
+  </button>
+</div>
 
-                        <div className="mt-auto pt-6">
-                          <span className="inline-flex items-center text-[11px] font-bold uppercase tracking-wider text-indigo-600">
-                            <span className="border-b border-indigo-100 group-hover:border-indigo-500 transition-colors">
-                              Abrir solicitudes
-                            </span>
-                            <span className="ml-1 transition-transform group-hover:translate-x-1">
-                              →
-                            </span>
-                          </span>
-                        </div>
-                      </div>
-                    </button>
-                  ) : null}
+{/* SECCIÓN RESUMEN DIARIO / ASISTENCIA */}
+{canViewTeamRecords ? (
+  <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-3 shadow-sm mt-3">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2 px-1">
+      <div className="flex items-center gap-2">
+        <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wide">
+          Asistencia Hoy
+        </h3>
+      </div>
 
-                  {/* 2. TELETRABAJO Y PERMISOS */}
-                  {canReviewExclusionRequests ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleTabClick("exclusions");
-                        scrollToSection(pendingRequestsSectionRef);
-                      }}
-                      className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-sky-300 hover:shadow-md active:scale-[0.98]"
-                    >
-                      <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
+      {/* Selector de fecha minificado */}
+      <div className="flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+        <button type="button" onClick={() => adjustTrackerDate(-1)} className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-slate-50 text-slate-500">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" /></svg>
+        </button>
+        <div className="flex items-center px-1.5 border-x border-slate-100">
+          <input
+            type="date"
+            value={trackerDate}
+            onChange={(e) => setTrackerDate(e.target.value)}
+            className="border-none bg-transparent text-xs font-bold text-slate-800 focus:outline-none focus:ring-0 cursor-pointer p-0"
+          />
+        </div>
+        <button type="button" onClick={() => adjustTrackerDate(1)} className="flex h-7 w-7 items-center justify-center rounded-lg hover:bg-slate-50 text-slate-500">
+          <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+        </button>
+      </div>
+    </div>
 
-                      <div className="relative flex h-full flex-col">
-                        <div className="flex items-center justify-between">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-50 text-sky-600 transition-colors group-hover:bg-sky-100">
-                            <svg
-                              xmlns="http://www.w3.org/2000/svg"
-                              fill="none"
-                              viewBox="0 0 24 24"
-                              strokeWidth={2}
-                              stroke="currentColor"
-                              className="h-5 w-5"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                d="M2.25 12l8.954-8.955c.44-.439 1.152-.439 1.591 0L21.75 12M4.5 9.75v10.125c0 .621.504 1.125 1.125 1.125H9.75v-4.875c0-.621.504-1.125 1.125-1.125h2.25c.621 0 1.125.504 1.125 1.125V21h4.125c.621 0 1.125-.504 1.125-1.125V9.75M8.25 21h8.25"
-                              />
-                            </svg>
-                          </div>
-                          <span className="text-3xl font-black tracking-tight text-slate-900">
-                            {pendingExclusionCount}
-                          </span>
-                        </div>
+    {/* Rejilla de Asistencia (Mismo formato plano) */}
+    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+      {/* 1. FICHADOS */}
+      <div
+        onClick={() => setManagerDailyListType("checked-in")}
+        className="group flex min-h-[68px] cursor-pointer items-center justify-between rounded-2xl border border-emerald-100 bg-white p-3 shadow-sm transition-all hover:border-emerald-300 active:scale-[0.98]"
+      >
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          </div>
+          <div className="flex flex-col text-left">
+            <span className="text-xs font-bold text-slate-700 leading-tight">Fichados</span>
+            <div className="mt-1.5 h-1 w-16 rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-emerald-500" style={{ width: `${Math.min(100, (checkedInTodayUsers.length / (totalExpectedTodayUsers.length || 1)) * 100)}%` }} />
+            </div>
+          </div>
+        </div>
+        <span className="text-lg font-black text-emerald-700 pr-1">{checkedInTodayUsers.length}</span>
+      </div>
 
-                        <div className="mt-5">
-                          <h3 className="text-base font-bold text-slate-900">
-                            Teletrabajo y permisos
-                          </h3>
-                          <p className="mt-1 text-xs text-slate-500">
-                            Gestión de ausencias y trabajo remoto.
-                          </p>
-                        </div>
+      {/* 2. SIN FICHAR */}
+      <div
+        onClick={() => setManagerDailyListType("missing")}
+        className="group flex min-h-[68px] cursor-pointer items-center justify-between rounded-2xl border border-rose-100 bg-white p-3 shadow-sm transition-all hover:border-rose-300 active:scale-[0.98]"
+      >
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-rose-50 text-rose-600">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </div>
+          <div className="flex flex-col text-left">
+            <span className="text-xs font-bold text-slate-700 leading-tight">Faltan</span>
+            <div className="mt-1.5 h-1 w-16 rounded-full bg-slate-100">
+              <div className="h-full rounded-full bg-rose-500" style={{ width: `${Math.min(100, (notCheckedInTodayUsers.length / (totalExpectedTodayUsers.length || 1)) * 100)}%` }} />
+            </div>
+          </div>
+        </div>
+        <span className="text-lg font-black text-rose-700 pr-1">{notCheckedInTodayUsers.length}</span>
+      </div>
 
-                        <div className="mt-auto pt-6">
-                          <span className="inline-flex items-center text-[11px] font-bold uppercase tracking-wider text-sky-600">
-                            <span className="border-b border-sky-100 group-hover:border-sky-500 transition-colors">
-                              Revisar permisos
-                            </span>
-                            <span className="ml-1 transition-transform group-hover:translate-x-1">
-                              →
-                            </span>
-                          </span>
-                        </div>
-                      </div>
-                    </button>
-                  ) : null}
-
-                  {/* 3. ANOMALÍAS DEL EQUIPO */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReviewModalMonth(
-                        reviewModalSelectedDate?.slice(0, 7) ??
-                          filteredManagerIncidentRecords[0]?.workDate.slice(
-                            0,
-                            7,
-                          ) ??
-                          trackerDate.slice(0, 7),
-                      );
-                      setShowManagerIncidentsModal(true);
-                    }}
-                    className="group relative flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 text-left shadow-sm transition-all hover:border-orange-300 hover:shadow-md active:scale-[0.98]"
-                  >
-                    <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-orange-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
-
-                    <div className="relative flex h-full flex-col">
-                      <div className="flex items-center justify-between">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-50 text-orange-600 transition-colors group-hover:bg-orange-100">
-                          <svg
-                            xmlns="http://www.w3.org/2000/svg"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            className="h-6 w-6"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth={2.35}
-                              d="M12 8.75v3.35m-6.928 6.9h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
-                            />
-                            <circle cx="12" cy="15.75" r="1.05" fill="currentColor" stroke="none" />
-                          </svg>
-                        </div>
-                        <span className="text-3xl font-black tracking-tight text-slate-900">
-                          {managerIncidentRecords.length}
-                        </span>
-                      </div>
-
-                      <div className="mt-5">
-                        <h3 className="text-base font-bold text-slate-900">
-                          {isCoordinatorManagerView
-                            ? "Registros horarios por validar"
-                            : "Fichajes por revisar"}
-                        </h3>
-                        <p className="mt-1 text-xs text-slate-500">
-                          {isCoordinatorManagerView ? (
-                            <>
-                              <span className="font-semibold text-orange-600">
-                                {managerIncidentUsersCount}
-                              </span>{" "}
-                              {managerIncidentUsersCount === 1
-                                ? "trabajador con desajustes de horas."
-                                : "trabajadores con desajustes de horas."}
-                            </>
-                          ) : (
-                            <>
-                              <span className="font-semibold text-orange-600">
-                                {managerIncidentUsersCount}
-                              </span>{" "}
-                              {managerIncidentUsersCount === 1
-                                ? "trabajador"
-                                : "trabajadores"}{" "}
-                              con anomalías.
-                            </>
-                          )}
-                        </p>
-                      </div>
-
-                      <div className="mt-auto pt-6">
-                        <span className="inline-flex items-center text-[11px] font-bold uppercase tracking-wider text-orange-600">
-                          <span className="border-b border-orange-100 group-hover:border-orange-500 transition-colors">
-                            Abrir revisión
-                          </span>
-                          <span className="ml-1 transition-transform group-hover:translate-x-1">
-                            →
-                          </span>
-                        </span>
-                      </div>
-                    </div>
-                  </button>
-                </div>
-
-                {canViewTeamRecords ? (
-                  <div className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm">
-                    <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-                      <div className="space-y-1">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                          Resumen diario
-                        </p>
-                        <h3 className="text-base font-semibold text-slate-900">
-                          Seguimiento de asistencia
-                        </h3>
-                        <p className="text-sm text-slate-600">
-                          Consulta quién ha fichado y quién falta en la fecha
-                          seleccionada.
-                        </p>
-                      </div>
-
-                      {/* Selector de fecha para seguimiento */}
-                      <div className="flex items-center gap-1 rounded-lg bg-white p-1 shadow-sm border border-slate-200">
-                        <button
-                          type="button"
-                          onClick={() => adjustTrackerDate(-1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-900 transition-colors"
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2.5}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M15 19l-7-7 7-7"
-                            />
-                          </svg>
-                        </button>
-                        <div className="flex items-center gap-2 px-2 border-x border-slate-100">
-                          <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest hidden sm:block">
-                            Fecha
-                          </label>
-                          <input
-                            type="date"
-                            value={trackerDate}
-                            onChange={(e) => setTrackerDate(e.target.value)}
-                            className="border-none bg-transparent text-sm font-semibold text-slate-900 focus:outline-none focus:ring-0 cursor-pointer"
-                          />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => adjustTrackerDate(1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 hover:bg-slate-50 hover:text-slate-900 transition-colors"
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2.5}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M9 5l7 7-7 7"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
-
-                    <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                      {/* 1. FICHADOS */}
-                      <div
-                        onClick={() => setManagerDailyListType("checked-in")}
-                        className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-emerald-300 hover:shadow-md active:scale-[0.98]"
-                      >
-                        <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
-
-                        <div className="relative flex h-full flex-col">
-                          <div className="flex items-center justify-between">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-600 transition-colors group-hover:bg-emerald-100">
-                              {/* Icono de Check / Usuario */}
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                strokeWidth={2.5}
-                                stroke="currentColor"
-                                className="h-5 w-5"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M18 7.5v3m0 0v3m0-3h3m-3 0h-3m-2.25-4.125a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zM3 19.235v-.11a6.375 6.375 0 0112.75 0v.109A12.318 12.318 0 019.374 21c-2.331 0-4.512-.645-6.374-1.766z"
-                                />
-                              </svg>
-                            </div>
-                            <span className="text-3xl font-black tracking-tight text-slate-900">
-                              {checkedInTodayUsers.length}
-                            </span>
-                          </div>
-
-                          <div className="mt-5">
-                            <h3 className="text-base font-bold text-slate-900">
-                              Fichados hoy
-                            </h3>
-                            {/* Barra de progreso sutil integrada */}
-                            <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100">
-                              <div
-                                className="h-full rounded-full bg-emerald-500 transition-all duration-700"
-                                style={{
-                                  width: `${Math.min(100, (checkedInTodayUsers.length / (totalExpectedTodayUsers.length || 1)) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                            <p className="mt-2 text-xs text-slate-500 italic">
-                              {checkedInTodayUsers.length} de{" "}
-                              {totalExpectedTodayUsers.length} esperados
-                            </p>
-                          </div>
-
-                          <div className="mt-auto pt-6">
-                            <span className="inline-flex items-center text-[11px] font-bold uppercase tracking-wider text-emerald-600">
-                              <span className="border-b border-emerald-100 group-hover:border-emerald-500 transition-colors">
-                                Ver lista de entrada
-                              </span>
-                              <span className="ml-1 transition-transform group-hover:translate-x-1">
-                                →
-                              </span>
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 2. SIN FICHAR */}
-                      <div
-                        onClick={() => setManagerDailyListType("missing")}
-                        className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-rose-300 hover:shadow-md active:scale-[0.98]"
-                      >
-                        <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
-
-                        <div className="relative flex h-full flex-col">
-                          <div className="flex items-center justify-between">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-50 text-rose-600 transition-colors group-hover:bg-rose-100">
-                              {/* Icono de Reloj / Alerta */}
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                strokeWidth={2.5}
-                                stroke="currentColor"
-                                className="h-5 w-5"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M12 6v6h4.5m4.5 0a9 9 0 11-18 0 9 9 0 0118 0z"
-                                />
-                              </svg>
-                            </div>
-                            <span className="text-3xl font-black tracking-tight text-slate-900">
-                              {notCheckedInTodayUsers.length}
-                            </span>
-                          </div>
-
-                          <div className="mt-5">
-                            <h3 className="text-base font-bold text-slate-900">
-                              Sin fichar
-                            </h3>
-                            <div className="mt-2 h-1.5 w-full rounded-full bg-slate-100">
-                              <div
-                                className="h-full rounded-full bg-rose-500 transition-all duration-700"
-                                style={{
-                                  width: `${Math.min(100, (notCheckedInTodayUsers.length / (totalExpectedTodayUsers.length || 1)) * 100)}%`,
-                                }}
-                              />
-                            </div>
-                            <p className="mt-2 text-xs text-slate-500">
-                              Pendientes de iniciar jornada.
-                            </p>
-                          </div>
-
-                          <div className="mt-auto pt-6">
-                            <span className="inline-flex items-center text-[11px] font-bold uppercase tracking-wider text-rose-600">
-                              <span className="border-b border-rose-100 group-hover:border-rose-500 transition-colors">
-                                Revisar ausencias
-                              </span>
-                              <span className="ml-1 transition-transform group-hover:translate-x-1">
-                                →
-                              </span>
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* 3. TOTAL / PLANTILLA ESPERADA */}
-                      <div
-                        onClick={() => setManagerDailyListType("exclusions")}
-                        className="group relative flex cursor-pointer flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-5 shadow-sm transition-all hover:border-slate-400 hover:shadow-md active:scale-[0.98]"
-                      >
-                        {/* Efecto de círculo de fondo */}
-                        <div className="absolute -top-3 -right-1 h-[4.8rem] w-[4.2rem] rounded-full bg-indigo-50/65 transition-transform duration-500 group-hover:scale-[1.8]" />
-
-                        <div className="relative flex h-full flex-col">
-                          <div className="flex items-center justify-between">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-100 text-slate-600 transition-colors group-hover:bg-slate-200">
-                              <svg
-                                xmlns="http://www.w3.org/2000/svg"
-                                fill="none"
-                                viewBox="0 0 24 24"
-                                strokeWidth={2.5}
-                                stroke="currentColor"
-                                className="h-5 w-5"
-                              >
-                                <path
-                                  strokeLinecap="round"
-                                  strokeLinejoin="round"
-                                  d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z"
-                                />
-                              </svg>
-                            </div>
-                            <span className="text-3xl font-black tracking-tight text-slate-900">
-                              {totalExpectedTodayUsers.length}
-                            </span>
-                          </div>
-
-                          <div className="mt-5">
-                            <h3 className="text-base font-bold text-slate-900">
-                              Plantilla esperada
-                            </h3>
-                            <p className="mt-2 text-xs leading-relaxed text-slate-500">
-                              {exclusionSummaryText}
-                            </p>
-                          </div>
-
-                          {/* SECCIÓN DE BOTONES INFERIORES (Donde estaba la cruz) */}
-                          <div className="mt-auto pt-6">
-                            <span className="inline-flex items-center text-[11px] font-bold uppercase tracking-wider text-slate-600">
-                              <span className="border-b border-slate-100 group-hover:border-slate-500 transition-colors">
-                                Abrir detalle diario
-                              </span>
-                              <span className="ml-1 transition-transform group-hover:translate-x-1">
-                                →
-                              </span>
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
+      {/* 3. PLANTILLA */}
+      <div
+        onClick={() => setManagerDailyListType("exclusions")}
+        className="group flex min-h-[68px] cursor-pointer items-center justify-between rounded-2xl border border-slate-200 bg-white p-3 shadow-sm transition-all hover:border-slate-400 active:scale-[0.98]"
+      >
+        <div className="flex items-center gap-2 overflow-hidden">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-slate-100 text-slate-600">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-4 w-4">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M15 19.128a9.38 9.38 0 002.625.372 9.337 9.337 0 004.121-.952 4.125 4.125 0 00-7.533-2.493M15 19.128v-.003c0-1.113-.285-2.16-.786-3.07M15 19.128v.106A12.318 12.318 0 018.624 21c-2.331 0-4.512-.645-6.374-1.766l-.001-.109a6.375 6.375 0 0111.964-3.07M12 6.375a3.375 3.375 0 11-6.75 0 3.375 3.375 0 016.75 0zm8.25 2.25a2.625 2.625 0 11-5.25 0 2.625 2.625 0 015.25 0z" />
+            </svg>
+          </div>
+          <div className="flex flex-col text-left">
+            <span className="text-xs font-bold text-slate-700 leading-tight">Plantilla</span>
+            <span className="mt-1 text-[10px] text-slate-400 leading-tight w-24 truncate">{exclusionSummaryText || "Total"}</span>
+          </div>
+        </div>
+        <span className="text-lg font-black text-slate-700 pr-1">{totalExpectedTodayUsers.length}</span>
+      </div>
+    </div>
+  </div>
+) : null}
+                
               </div>
 
+              {managerVisibleTabCount > 1 ? renderManagerReviewMenu() : null}
+
               {/* 3. CUADRANTE DIARIO */}
-              {canViewTeamRecords ? (
+              {canViewTeamRecords && managerReviewTab === "tracker" ? (
                 <div
                   className="mb-12 overflow-hidden rounded-[2.5rem] border border-slate-200 bg-white shadow-sm transition-all hover:shadow-md"
                   id="cuadrante-diario"
                 >
                   {/* Cabecera del Cuadrante */}
                   <div className="border-b border-slate-100 p-5 lg:p-6">
-                    <div className="flex flex-wrap items-start justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <div className="h-4 w-1 rounded-full bg-indigo-600" />
-                          <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-slate-400">
-                            Visualizador Temporal
-                          </span>
-                        </div>
-                        <h3 className="text-lg font-black text-slate-900 tracking-tight lg:text-xl">
-                          Cuadrante de fichajes
-                        </h3>
-                        <p className="max-w-2xl text-sm text-slate-500">
-                          Distribución horaria de la actividad del equipo por
-                          slots de 60 minutos.
-                        </p>
-                      </div>
+  <div className="flex flex-wrap items-start justify-between gap-4">
+   <div className="space-y-1">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+            Visualizador Temporal
+          </span>
+        </div>
+        
+        {/* Zona Interactiva del Título (Trigger del Hover) */}
+        <div className="relative group inline-block">
+          <div className="flex items-center gap-1.5 cursor-help select-none">
+            <h3 className="text-lg font-bold text-slate-900 lg:text-xl">
+              Cuadrante de fichajes
+            </h3>
+            {/* Pequeño indicador visual de ayuda */}
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={2.5} stroke="currentColor" className="h-4 w-4 text-slate-400 transition-colors group-hover:text-slate-600">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9.879 7.519c1.171-1.025 3.071-1.025 4.242 0 1.172 1.025 1.172 2.687 0 3.712-.203.179-.43.326-.67.442-.745.361-1.45.999-1.45 1.827v.75M21 12a9 9 0 11-18 0 9 9 0 0118 0zm-9 5.25h.008v.008H12v-.008z" />
+            </svg>
+          </div>
 
-                      {/* Navegación de Fecha Refinada */}
-                      <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 shadow-sm">
-                        <button
-                          type="button"
-                          onClick={() => adjustTrackerDate(-1)}
-                          className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 transition-all hover:text-indigo-600 active:scale-90"
-                        >
-                          <svg
-                            className="h-5 w-5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2.5}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M15 19l-7-7 7-7"
-                            />
-                          </svg>
-                        </button>
+          {/* Popover Flotante: Contiene los estados y validaciones */}
+          <div className="absolute top-full left-0 z-50 mt-2 pointer-events-none opacity-0 scale-95 group-hover:pointer-events-auto group-hover:opacity-100 group-hover:scale-100 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xl transition-all duration-150 ease-out min-w-[320px] sm:min-w-[420px]">
+            <div className="border-b border-slate-100 pb-1.5">
+              <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">Leyenda de marcas</p>
+            </div>
+            
+            {/* Bloque: Estado */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Estado</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {RECORD_STATE_LEGEND_ITEMS.map(renderLegendChip)}
+              </div>
+            </div>
 
-                        <div className="px-4">
-                          <input
-                            type="date"
-                            value={trackerDate}
-                            onChange={(e) => setTrackerDate(e.target.value)}
-                            className="bg-transparent text-sm font-black uppercase tracking-tight text-slate-700 outline-none cursor-pointer"
-                          />
-                        </div>
+            {/* Bloque: Validación */}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">Validación</span>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {RECORD_VALIDATION_LEGEND_ITEMS.map(renderLegendChip)}
+              </div>
+            </div>
+          </div>
+        </div>
 
-                        <button
-                          type="button"
-                          onClick={() => adjustTrackerDate(1)}
-                          className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 transition-all hover:text-indigo-600 active:scale-90"
-                        >
-                          <svg
-                            className="h-5 w-5"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2.5}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M9 5l7 7-7 7"
-                            />
-                          </svg>
-                        </button>
-                      </div>
-                    </div>
+        <p className="max-w-2xl text-sm text-slate-500">
+          Distribución horaria de la actividad del equipo por slots de 60 minutos.
+        </p>
+      </div>
 
-                    <div id= "margin" className="mt-4 flex flex-wrap items-center gap-4 border-t border-slate-50 pt-4">
-                      <span className="text-[11px] font-semibold text-slate-500">Estado</span>
-                      {RECORD_STATE_LEGEND_ITEMS.map(renderLegendChip)}
-                      <span className="h-3.5 w-px bg-slate-200" />
-                      <span className="text-[11px] font-semibold text-slate-500">Validación</span>
-                      {RECORD_VALIDATION_LEGEND_ITEMS.map(renderLegendChip)}
-                    </div>
+    {/* Navegación de Fecha Refinada */}
+    <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 shadow-sm">
+      <button
+        type="button"
+        onClick={() => adjustTrackerDate(-1)}
+        className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 transition-all hover:text-indigo-600 active:scale-90"
+      >
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+        </svg>
+      </button>
 
-{/* CONTENEDOR PRINCIPAL DE FILTROS DEL CUADRANTE */}
-<div className="mb-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
-  <div className="flex flex-wrap items-end gap-4">
-    
-    {/* 1. Buscar Trabajador (El primero y expandido) */}
-    <div className="min-w-[280px] flex-1">
-      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
-        Buscar Trabajador
-      </label>
-      <div className="relative">
-        <Input
-          type="search"
-          value={managerUserSearch} 
-          onChange={(e) => setManagerUserSearch(e.target.value)}
-          placeholder="Ej: Juan Pérez..."
-          className="h-10 w-full rounded-xl border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
+      <div className="px-4">
+        <input
+          type="date"
+          value={trackerDate}
+          onChange={(e) => setTrackerDate(e.target.value)}
+          className="bg-transparent text-sm font-black uppercase tracking-tight text-slate-700 outline-none cursor-pointer"
         />
-        {/* Icono de Lupa integrado */}
-        <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
-          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => adjustTrackerDate(1)}
+        className="flex h-10 w-10 items-center justify-center rounded-xl bg-white text-slate-600 shadow-sm ring-1 ring-slate-200 transition-all hover:text-indigo-600 active:scale-90"
+      >
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  {/* CONTENEDOR PRINCIPAL DE FILTROS DEL CUADRANTE */}
+  <div className="mt-6 mb-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
+    <div className="flex flex-wrap items-end gap-4">
+      {/* 1. Buscar Trabajador (El primero y expandido) */}
+      <div className="min-w-[280px] flex-1">
+        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
+          Buscar Trabajador
+        </label>
+        <div className="relative">
+          <Input
+            type="search"
+            value={managerUserSearch}
+            onChange={(e) => setManagerUserSearch(e.target.value)}
+            placeholder="Ej: Juan Pérez..."
+            className="h-10 w-full rounded-xl border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
+          />
+          {/* Icono de Lupa integrado */}
+          <div className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-slate-400">
+            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </div>
         </div>
       </div>
-    </div>
 
-    {/* 2. Filtro de Estado */}
+      {/* 2. Filtro de Estado */}
       <div className="w-[200px] shrink-0">
-            <Select
-                id="trackerStatusFilter"
-                label="Estado"
-                value={trackerStatusFilter}
-                onChange={(event) =>
-                setTrackerStatusFilter(
-                event.target.value as "" | DisplayWorkdayStatus,
-                )
-                }
-               options={[
-               { value: "", label: "Todos" },
-               { value: "COMPLETED", label: "Cerrado" },
-               { value: "OPEN", label: "Abierta" },
-               { value: "ABSENT", label: "Ausente" },
-              ]}
-              />
-      
-        </div>
+        <Select
+          id="trackerStatusFilter"
+          label="Estado"
+          value={trackerStatusFilter}
+          onChange={(event) =>
+            setTrackerStatusFilter(event.target.value as "" | DisplayWorkdayStatus)
+          }
+          options={[
+            { value: "", label: "Todos" },
+            { value: "COMPLETED", label: "Cerrado" },
+            { value: "OPEN", label: "Abierta" },
+            { value: "ABSENT", label: "Ausente" },
+          ]}
+        />
+      </div>
 
-    {/* 3. Filtro de Validación (¡Tu lógica original insertada en el nuevo diseño!) */}
-    <div className="w-[200px] shrink-0">
-      <Select
-        id="trackerTrustFilter"
-        label="Validación"
-        value={trackerTrustFilter}
-        onChange={(event) =>
-          setTrackerTrustFilter(
-            event.target.value as "" | DisplayWorkdayTrustLevel
-          )
-        }
-        options={[
-          { value: "", label: "Todas" },
-          { value: "CORRECT", label: "Correcta" },
-          { value: "REVIEW", label: "Revisar" },
-        ]}
-      />
+      {/* 3. Filtro de Validación */}
+      <div className="w-[200px] shrink-0">
+        <Select
+          id="trackerTrustFilter"
+          label="Validación"
+          value={trackerTrustFilter}
+          onChange={(event) =>
+            setTrackerTrustFilter(event.target.value as "" | DisplayWorkdayTrustLevel)
+          }
+          options={[
+            { value: "", label: "Todas" },
+            { value: "CORRECT", label: "Correcta" },
+            { value: "REVIEW", label: "Revisar" },
+          ]}
+        />
+      </div>
     </div>
-
   </div>
-</div> 
 </div>
 
                   {/* Rejilla Horaria con diseño de Slots */}
@@ -6168,8 +6553,11 @@ const filteredRecords = useMemo(() => {
                                     const checkOutTime = matchingRecord.checkOutAt
                                       ? formatTimeOnly(matchingRecord.checkOutAt)
                                       : "en curso";
-                                    const flags =
-                                      matchingRecord.incidentFlags ?? [];
+                                    const shortSegmentMinWidth =
+                                      matchingRecord.workedMinutes > 0 &&
+                                      matchingRecord.workedMinutes < 30
+                                        ? "16px"
+                                        : undefined;
                                     return (
                                       <td
                                         key={`cell-${member.id}-${h}`}
@@ -6203,6 +6591,7 @@ const filteredRecords = useMemo(() => {
                                               )
                                             }
                                             onMouseLeave={() => setTrackerTooltip(null)}
+                                            style={{ minWidth: shortSegmentMinWidth }}
                                             className={`h-9 w-full cursor-pointer rounded-lg shadow-lg ring-1 ring-white/20 transition-all duration-200 active:scale-95 hover:brightness-110 ${colorClasses} ${
                                               leftFraction > 0
                                                 ? "rounded-l-sm"
@@ -6226,96 +6615,10 @@ const filteredRecords = useMemo(() => {
 
               <div
                 ref={pendingRequestsSectionRef}
-                className="flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm"
+                className={`flex flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm ${
+                  managerReviewTab === "tracker" ? "hidden" : ""
+                }`}
               >
-                <div className="border-b border-slate-100 bg-white p-1.5">
-                  <div className={`grid gap-1 ${managerMenuColsClass}`}>
-                    {/* 1. SOLICITUDES DE FICHAJE */}
-                    {canReviewAdjustmentRequests ? (
-                      <button
-                        type="button"
-                        onClick={() => handleTabClick("requests")}
-                        className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
-                          managerReviewTab === "requests"
-                            ? "bg-slate-900 text-white shadow-sm"
-                            : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                        }`}
-                      >
-                        Solicitudes
-                        {!viewedTabs.includes("requests") &&
-                          pendingRequests.length > 0 && (
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs transition-opacity duration-300 ${managerReviewTab === "requests" ? "bg-white/20 text-white" : "bg-rose-100 text-rose-600"}`}
-                            >
-                              {pendingRequests.length}
-                            </span>
-                          )}
-                      </button>
-                    ) : null}
-
-                    {/* 2. REVISIÓN HORARIA */}
-                    <button
-                      type="button"
-                      onClick={() => handleTabClick("incidents")}
-                      className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
-                        managerReviewTab === "incidents"
-                          ? "bg-slate-900 text-white shadow-sm"
-                          : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                      }`}
-                    >
-                      {isCoordinatorManagerView
-                        ? "Revisión horaria"
-                        : "Revisión"}
-                      {!viewedTabs.includes("incidents") &&
-                        pendingIncidentJustifications.length > 0 && (
-                          <span
-                            className={`rounded-full px-2 py-0.5 text-xs transition-opacity duration-300 ${managerReviewTab === "incidents" ? "bg-white/20 text-white" : "bg-rose-100 text-rose-600"}`}
-                          >
-                            {pendingIncidentJustifications.length}
-                          </span>
-                        )}
-                    </button>
-
-                    {/* 3. REGISTROS DE EQUIPO */}
-                    {canViewTeamRecords ? (
-                      <button
-                        type="button"
-                        onClick={() => handleTabClick("records")}
-                        className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
-                          managerReviewTab === "records"
-                            ? "bg-slate-900 text-white shadow-sm"
-                            : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                        }`}
-                      >
-                        Fichajes
-                      </button>
-                    ) : null}
-
-                    {/* 4. TELETRABAJO Y PERMISOS */}
-                    {canReviewExclusionRequests ? (
-                      <button
-                        type="button"
-                        onClick={() => handleTabClick("exclusions")}
-                        className={`flex items-center justify-center gap-2 rounded-xl px-4 py-2 text-sm font-semibold transition-all duration-300 ${
-                          managerReviewTab === "exclusions"
-                            ? "bg-slate-900 text-white shadow-sm"
-                            : "bg-white text-slate-600 hover:bg-slate-50 hover:text-slate-900"
-                        }`}
-                      >
-                        Permisos
-                        {!viewedTabs.includes("exclusions") &&
-                          pendingExclusionCount > 0 && (
-                            <span
-                              className={`rounded-full px-2 py-0.5 text-xs transition-opacity duration-300 ${managerReviewTab === "exclusions" ? "bg-white/20 text-white" : "bg-rose-100 text-rose-600"}`}
-                            >
-                              {pendingExclusionCount}
-                            </span>
-                          )}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-
                 {canViewTeamRecords && managerReviewTab === "records" ? (
                   <div
                     className="border-b border-slate-100 bg-slate-50/50 p-5"
@@ -6428,9 +6731,9 @@ const filteredRecords = useMemo(() => {
 
     {/* 6. Botón de Limpiar Filtros (Alineado automáticamente a la derecha) */}
     <div className="ml-auto shrink-0">
-      <Button
-        variant="secondary"
-        className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-800 active:scale-95"
+      <button
+        type="button"
+        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
         onClick={() => {
           setManagerUserSearch("");
           setManagerUserFilter("");
@@ -6440,9 +6743,9 @@ const filteredRecords = useMemo(() => {
           setManagerHourTo("");
         }}
       >
-       
-        <span>Limpiar</span>
-      </Button>
+        <i className="ti ti-brush" style={{ fontSize: "16px" }} aria-hidden="true"></i>
+        <span>Limpiar filtros</span>
+      </button>
     </div>
 
   </div>
@@ -6551,13 +6854,14 @@ const filteredRecords = useMemo(() => {
 
                           {/* 5. Botón Limpiar */}
                           <div className="ml-auto shrink-0">
-                            <Button
-                              variant="secondary"
-                              className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 active:scale-95"
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
                               onClick={clearRequestFilters}
                             >
-                              <span>Limpiar</span>
-                            </Button>
+                              <i className="ti ti-brush" style={{ fontSize: "16px" }} aria-hidden="true"></i>
+                              <span>Limpiar filtros</span>
+                            </button>
                           </div>
 
                         </div>
@@ -6668,51 +6972,40 @@ const filteredRecords = useMemo(() => {
                                       />
                                     </td>
 
-                                    <td className="py-4 pr-4 align-middle text-right">
-                                      <div className="flex justify-end gap-2">
-                                        {(request.status ===
-                                          "PENDING_COORDINATOR" ||
-                                          request.status ===
-                                            "PENDING_ADMIN") && (
-                                          <>
-                                            <Button
-                                              variant="secondary"
-                                              className="rounded-full border-rose-200 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-rose-700 shadow-none hover:bg-rose-50"
-                                              onClick={() =>
-                                                reviewRequest(
-                                                  request.id,
-                                                  "REJECTED",
-                                                )
-                                              }
-                                              disabled={
-                                                reviewSubmittingId ===
-                                                  request.id ||
-                                                !isFunctionalAdmin
-                                              }
-                                            >
-                                              Rechazar
-                                            </Button>
-
-                                            <Button
-                                              className="rounded-full bg-emerald-600 px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-700"
-                                              onClick={() =>
-                                                reviewRequest(
-                                                  request.id,
-                                                  "APPROVED",
-                                                )
-                                              }
-                                              disabled={
-                                                reviewSubmittingId ===
-                                                  request.id ||
-                                                !isFunctionalAdmin
-                                              }
-                                            >
-                                              Aprobar
-                                            </Button>
-                                          </>
-                                        )}
-                                      </div>
-                                    </td>
+<td className="px-4 py-4">
+  <div className="flex items-center gap-2">
+    {/* NOTA: Si tu variable se llama 'justification' o 'record', cámbialo aquí abajo */}
+    {request.status === "PENDING_COORDINATOR" ||
+    request.status === "PENDING_ADMIN" ? (
+      <>
+        <button
+          onClick={() =>
+            reviewRequest(request.id, "REJECTED")
+          }
+          disabled={
+            reviewSubmittingId === request.id ||
+            !canReviewAdjustmentRequests
+          }
+          className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 shadow-sm transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Rechazar
+        </button>
+        <button
+          onClick={() =>
+            reviewRequest(request.id, "APPROVED")
+          }
+          disabled={
+            reviewSubmittingId === request.id ||
+            !canReviewAdjustmentRequests
+          }
+          className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          Aprobar
+        </button>
+      </>
+    ) : null}
+  </div>
+</td>
                                   </tr>
                                 ))}
                               </tbody>
@@ -6726,21 +7019,21 @@ const filteredRecords = useMemo(() => {
 
                 {managerReviewTab === "incidents" ? (
                   <div className="bg-white p-6" style={tabPanelAnimationStyle}>
-                    <div className="mb-6 space-y-1">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
-                        Revisión
-                      </p>
-                      <h3 className="text-base font-semibold text-slate-900">
-                        {isCoordinatorManagerView
-                          ? "Registros horarios por validar"
-                          : "Control de anomalías y justificaciones"}
-                      </h3>
-                      <p className="text-sm text-slate-600">
-                        {isCoordinatorManagerView
-                          ? "Revisa excesos o faltas de horas de los trabajadores de tu ámbito."
-                          : "Gestiona tanto las justificaciones enviadas por el equipo como los fichajes con anomalías detectadas automáticamente."}
-                      </p>
-                    </div>
+                    {!isCoordinatorManagerView ? (
+                      <div className="mb-6 space-y-1">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
+                          Revisión
+                        </p>
+                        <h3 className="text-base font-semibold text-slate-900">
+                          Control de anomalías y justificaciones
+                        </h3>
+                        <p className="text-sm text-slate-600">
+                          Gestiona tanto las justificaciones enviadas por el
+                          equipo como los fichajes con anomalías detectadas
+                          automáticamente.
+                        </p>
+                      </div>
+                    ) : null}
 
                     <div className="space-y-8">
 {isCoordinatorManagerView ? (
@@ -6768,7 +7061,7 @@ const filteredRecords = useMemo(() => {
           </svg>
         </button>
         <span className="min-w-[120px] text-center text-sm font-semibold capitalize text-slate-700">
-          {formatMonthLabel(trackerCalendarMonth)}
+          {formatMonthName(trackerCalendarMonth)}
         </span>
         <button
           type="button"
@@ -6813,7 +7106,12 @@ const filteredRecords = useMemo(() => {
           <button
             key={cell.workDate}
             type="button"
-            onClick={() => setTrackerDate(cell.workDate!)}
+            onClick={() => {
+              setTrackerDate(cell.workDate!);
+              if (incidentCount > 0) {
+                setCoordinatorCalendarDetailDate(cell.workDate!);
+              }
+            }}
             className={`flex h-12 flex-col items-center justify-center rounded-xl border text-sm font-semibold transition ${
               isSelected
                 ? "border-slate-900 bg-slate-900 text-white shadow-sm"
@@ -6845,76 +7143,11 @@ const filteredRecords = useMemo(() => {
       </span>
       <span className="inline-flex items-center gap-1.5">
         <span className="h-2 w-2 rounded-full bg-orange-500" />
-        Días con registros por validar
+        Días con desajustes horarios
       </span>
     </div>
   </div>
 ) : null}
-{/* CONTENEDOR PRINCIPAL DE FILTROS - REVISIÓN */}
-<div className="mb-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
-  <div className="flex flex-wrap items-end gap-4">
-
-    {/* 1. Trabajador (Ahora va el primero y se expande para dar comodidad al escribir) */}
-    <div className="min-w-[280px] flex-1">
-      <Input
-        id="incidentsUserFilterManager"
-        label="Trabajador"
-        type="search"
-        list="incidentUserFilterSuggestions"
-        value={incidentUserSearch}
-        placeholder="Todos los trabajadores..."
-        className="h-10 w-full rounded-xl border-slate-200 bg-white text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
-        onChange={(event) => {
-          const nextValue = event.target.value;
-          setIncidentUserSearch(nextValue);
-          const exactMatch = teamMembers.find(
-            (member) => member.name === nextValue,
-          );
-          setIncidentUserFilter(exactMatch?.id ?? "");
-        }}
-      />
-    </div>
-    
-    {/* Lista de sugerencias para el autocompletado (Mantiene tu lógica) */}
-    <datalist id="incidentUserFilterSuggestions">
-      {teamMembers.map((member) => (
-        <option key={`incident-user-${member.id}`} value={member.name} />
-      ))}
-    </datalist>
-
-    {/* 2. Estado de la Justificación */}
-    <div className="w-[240px] shrink-0">
-        <Select
-          id="incidentsStatusFilterManager"
-          label="Estado Justificación"
-          value={incidentStatusFilter}
-          onChange={(e) => setIncidentStatusFilter(e.target.value)}
-          options={[
-            { value: "", label: "Todos los estados" },
-            {
-              value: PENDING_ADMINISTRATION_FILTER_VALUE,
-              label: "Pendiente Administración",
-            },
-            { value: "APPROVED", label: "Aprobada" },
-            { value: "REJECTED", label: "Rechazada" },
-          ]}
-      />
-    </div>
-
-    {/* 3. Botón de Limpiar Filtros (Alineado automáticamente a la derecha) */}
-    <div className="ml-auto shrink-0">
-      <Button
-        variant="secondary"
-        className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 active:scale-95"
-        onClick={clearIncidentFilters}
-      >
-        <span>Limpiar Filtros</span>
-      </Button>
-    </div>
-
-  </div>
-</div>
-
                       {/* Sección 1: Justificaciones Pendientes */}
                       {!isCoordinatorManagerView ? (
                         <div className="space-y-4">
@@ -6959,7 +7192,7 @@ const filteredRecords = useMemo(() => {
                                           key={justification.id}
                                           className="hover:bg-slate-50/50 transition-colors"
                                         >
-                                          <td className="px-4 py-4">
+                                          <td className="px-4 py-4" id= "1">
                                             <p className="font-semibold text-slate-900">
                                               {getDisplayUserName(
                                                 justification.userId,
@@ -6967,7 +7200,7 @@ const filteredRecords = useMemo(() => {
                                               )}
                                             </p>
                                           </td>
-                                          <td className="px-4 py-4">
+                                          <td className="px-4 py-4" id="2">
                                             <div className="space-y-1">
                                               <p className="font-medium text-slate-900">
                                                 {justification.workDate
@@ -6988,14 +7221,14 @@ const filteredRecords = useMemo(() => {
                                               </p>
                                             </div>
                                           </td>
-                                          <td className="px-4 py-4">
+                                          <td className="px-4 py-4" id="3">
                                             <p className="max-w-[250px] whitespace-normal leading-5 text-slate-700">
                                               {justification.reason}
                                             </p>
                                           </td>
-                                          <td className="px-4 py-4">
+                                          <td className="px-4 py-4" id="4">
                                             <span
-                                              className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${INCIDENT_JUSTIFICATION_STATUS_CLASSES[justification.status]}`}
+                                              className={`${SOFT_STATUS_CHIP_CLASS} ${INCIDENT_JUSTIFICATION_STATUS_CLASSES[justification.status]}`}
                                             >
                                               {
                                                 INCIDENT_JUSTIFICATION_STATUS_LABELS[
@@ -7004,7 +7237,7 @@ const filteredRecords = useMemo(() => {
                                               }
                                             </span>
                                           </td>
-                                          <td className="px-4 py-4">
+                                          <td className="px-4 py-4" id="5">
                                             <div className="flex items-center gap-2">
                                               {justification.status ===
                                                 "PENDING_COORDINATOR" ||
@@ -7012,37 +7245,55 @@ const filteredRecords = useMemo(() => {
                                                 "PENDING_ADMIN" ? (
                                                 <>
                                                   <button
-                                                    onClick={() =>
-                                                      reviewIncidentJustification(
-                                                        justification.id,
-                                                        "REJECTED",
-                                                      )
-                                                    }
-                                                    disabled={
-                                                      reviewSubmittingId ===
-                                                        justification.id ||
-                                                      !canReviewIncidentRequests
-                                                    }
-                                                    className="rounded-full border border-rose-200 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50"
-                                                  >
-                                                    Rechazar
-                                                  </button>
-                                                  <button
-                                                    onClick={() =>
-                                                      reviewIncidentJustification(
-                                                        justification.id,
-                                                        "APPROVED",
-                                                      )
-                                                    }
-                                                    disabled={
-                                                      reviewSubmittingId ===
-                                                        justification.id ||
-                                                      !canReviewIncidentRequests
-                                                    }
-                                                    className="rounded-full bg-emerald-600 px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
-                                                  >
-                                                    Aprobar
-                                                  </button>
+          onClick={() => reviewIncidentJustification(justification.id, "REJECTED")}
+          disabled={
+            reviewSubmittingId === justification.id || !canReviewIncidentRequests
+          }
+          className="group flex items-center justify-center gap-1.5 bg-white border border-red-200 text-xs font-medium text-slate-600 hover:text-slate-800 hover:bg-red-50 rounded-xl px-3 py-1.5 shadow-sm transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+        >
+          {reviewSubmittingId === justification.id ? (
+            <svg className="animate-spin h-3.5 w-3.5 text-red-500" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          ) : (
+            <svg
+              className="h-3.5 w-3.5 text-red-500 transition-transform duration-300 group-hover:scale-110"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          )}
+          <span>Rechazar</span>
+        </button>
+        <button
+          onClick={() => reviewIncidentJustification(justification.id, "APPROVED")}
+          disabled={
+            reviewSubmittingId === justification.id || !canReviewIncidentRequests
+          }
+          className="group flex items-center justify-center gap-1.5 bg-emerald-600 border border-transparent text-xs font-medium text-white hover:bg-emerald-700 rounded-xl px-3 py-1.5 shadow-sm transition-all duration-300 disabled:opacity-50 disabled:cursor-not-allowed active:scale-95"
+        >
+          {reviewSubmittingId === justification.id ? (
+            <svg className="animate-spin h-3.5 w-3.5 text-white" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          ) : (
+            <svg
+              className="h-3.5 w-3.5 text-emerald-100 transition-transform duration-300 group-hover:scale-110"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+            </svg>
+          )}
+          <span>Aprobar</span>
+        </button>
                                                 </>
                                               ) : null}
                                             </div>
@@ -7064,7 +7315,7 @@ const filteredRecords = useMemo(() => {
                           <div className="h-1.5 w-1.5 rounded-full bg-orange-500" />
                           <h4 className="text-sm font-bold uppercase tracking-wider text-slate-700">
                             {isCoordinatorManagerView
-                              ? "Registros horarios por validar ("
+                              ? "Registros horarios revisables ("
                               : "Fichajes por revisar ("}
                             {filteredManagerIncidentRecords.length})
                           </h4>
@@ -7076,27 +7327,58 @@ const filteredRecords = useMemo(() => {
                         </div>
 
                         <div className="grid gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2 xl:grid-cols-6">
-                          <Input
-                            id="incidentRecordUserFilter"
-                            label="Trabajador"
-                            type="search"
-                            list="incidentRecordUserFilterSuggestions"
-                            value={incidentRecordUserSearch}
-                            placeholder="Todos"
-                            onChange={(event) => {
-                              const nextValue = event.target.value;
-                              setIncidentRecordUserSearch(nextValue);
-                              const exactMatch = teamMembers.find(
-                                (member) => member.name === nextValue,
-                              );
-                              setIncidentRecordUserFilter(exactMatch?.id ?? "");
-                            }}
-                          />
-                          <datalist id="incidentRecordUserFilterSuggestions">
-                            {teamMembers.map((member) => (
-                              <option key={`incident-record-user-${member.id}`} value={member.name} />
-                            ))}
-                          </datalist>
+                          <div className="relative">
+                            <Input
+                              id="incidentRecordUserFilter"
+                              label="Trabajador"
+                              type="search"
+                              value={incidentRecordUserSearch}
+                              placeholder="Escribe un trabajador..."
+                              autoComplete="off"
+                              onFocus={() => setShowIncidentRecordUserSuggestions(true)}
+                              onClick={() => setShowIncidentRecordUserSuggestions(true)}
+                              onBlur={() => {
+                                window.setTimeout(
+                                  () => setShowIncidentRecordUserSuggestions(false),
+                                  120,
+                                );
+                              }}
+                              onChange={(event) => {
+                                const nextValue = event.target.value;
+                                setIncidentRecordUserSearch(nextValue);
+                                setShowIncidentRecordUserSuggestions(true);
+                                const exactMatch = teamMembers.find(
+                                  (member) => member.name === nextValue,
+                                );
+                                setIncidentRecordUserFilter(exactMatch?.id ?? "");
+                              }}
+                            />
+                            {showIncidentRecordUserSuggestions ? (
+                              <div className="absolute left-0 right-0 top-full z-30 mt-2 max-h-60 overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 text-sm shadow-xl">
+                                {incidentRecordUserSuggestions.length > 0 ? (
+                                  incidentRecordUserSuggestions.map((member) => (
+                                    <button
+                                      key={`incident-record-user-suggestion-${member.id}`}
+                                      type="button"
+                                      className="block w-full rounded-lg px-3 py-2 text-left font-medium text-slate-700 transition hover:bg-slate-100 hover:text-slate-950"
+                                      onMouseDown={(event) => event.preventDefault()}
+                                      onClick={() => {
+                                        setIncidentRecordUserSearch(member.name);
+                                        setIncidentRecordUserFilter(member.id);
+                                        setShowIncidentRecordUserSuggestions(false);
+                                      }}
+                                    >
+                                      {member.name}
+                                    </button>
+                                  ))
+                                ) : (
+                                  <p className="px-3 py-2 text-sm text-slate-500">
+                                    No hay trabajadores que coincidan.
+                                  </p>
+                                )}
+                              </div>
+                            ) : null}
+                          </div>
                           <Input
                             label="Desde"
                             type="date"
@@ -7144,13 +7426,14 @@ const filteredRecords = useMemo(() => {
                             ]}
                           />
                           <div className="flex items-end">
-                            <Button
-                              variant="secondary"
-                              className="bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 rounded-xl px-4 py-2 shadow-sm transition-all"
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
                               onClick={clearIncidentRecordFilters}
                             >
-                              Limpiar
-                            </Button>
+                              <i className="ti ti-brush" style={{ fontSize: "16px" }} aria-hidden="true"></i>
+                              <span>Limpiar filtros</span>
+                            </button>
                           </div>
                         </div>
 
@@ -7163,12 +7446,13 @@ const filteredRecords = useMemo(() => {
                           </div>
                         ) : (
                           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
-                            <div className="hidden grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,2fr)] gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 md:grid">
+                            <div className="hidden grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,1.2fr)_52px] gap-3 border-b border-slate-100 bg-slate-50 px-4 py-3 text-[11px] font-bold uppercase tracking-wider text-slate-500 md:grid">
                               <span>Trabajador</span>
                               <span>Fecha</span>
                               <span>Estado</span>
                               <span>Validación</span>
                               <span>Detalle</span>
+                              <span className="text-center">Info</span>
                             </div>
                             <div className="divide-y divide-slate-100">
                               {filteredManagerIncidentRecords.map((record) => (
@@ -7178,7 +7462,7 @@ const filteredRecords = useMemo(() => {
                                   onClick={() =>
                                     openManagerRecordDetail(record)
                                   }
-                                  className="group grid w-full gap-2 px-4 py-3 text-left transition hover:bg-orange-50/40 md:grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,2fr)] md:items-center md:gap-3"
+                                  className="group grid w-full gap-2 px-4 py-3 text-left transition hover:bg-orange-50/40 md:grid-cols-[minmax(0,1.5fr)_110px_120px_120px_minmax(0,1.2fr)_52px] md:items-center md:gap-3"
                                 >
                                   <div className="min-w-0">
                                     <p className="truncate text-sm font-semibold text-slate-900">
@@ -7196,7 +7480,7 @@ const filteredRecords = useMemo(() => {
                                   </span>
                                   <div>
                                     <span
-                                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${STATUS_CLASSES[getDisplayRecordStatus(record)]}`}
+                                      className={`${SOFT_STATUS_CHIP_CLASS} ${STATUS_CLASSES[getDisplayRecordStatus(record)]}`}
                                     >
                                       {
                                         STATUS_LABELS[
@@ -7207,7 +7491,7 @@ const filteredRecords = useMemo(() => {
                                   </div>
                                   <div>
                                     <span
-                                      className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${TRUST_LEVEL_CLASSES[getDisplayTrustLevel(record)]}`}
+                                      className={`${SOFT_STATUS_CHIP_CLASS} ${TRUST_LEVEL_CLASSES[getDisplayTrustLevel(record)]}`}
                                     >
                                       {getDisplayTrustLabel(record)}
                                     </span>
@@ -7217,29 +7501,23 @@ const filteredRecords = useMemo(() => {
                                       {getRecordLine(record)}
                                     </p>
                                     {isCoordinatorManagerView ? (
-                                      <p className="text-sm text-slate-700">
+                                      <p className="truncate text-sm text-slate-700">
                                         {getCoordinatorIncidentDetail(record)}
                                       </p>
                                     ) : (
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {getStatusDetailItems(record).map((item) => (
-                                          <span
-                                            key={`${record.id}-list-detail-${item}`}
-                                            className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold leading-4 ${getStatusDetailItemClass(record)}`}
-                                          >
-                                            {item}
-                                          </span>
-                                        ))}
-                                      </div>
+                                      <p className="truncate text-sm text-slate-700">
+                                        {getStatusDetail(record)}
+                                      </p>
                                     )}
-                                    <div className="mt-2 flex items-center gap-1">
-                                      <span className="text-[11px] font-bold uppercase tracking-wider text-orange-600 transition-colors group-hover:text-orange-700">
-                                        Abrir detalle
-                                      </span>
-                                      <span className="text-sm text-slate-300 transition-all group-hover:translate-x-0.5 group-hover:text-orange-400">
-                                        →
-                                      </span>
-                                    </div>
+                                  </div>
+                                  <div className="flex md:justify-center">
+                                    <span
+                                      className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition group-hover:border-orange-200 group-hover:bg-orange-50 group-hover:text-orange-600"
+                                      title="Abrir detalle"
+                                      aria-hidden="true"
+                                    >
+                                      <i className="ti ti-info-circle text-[18px]" aria-hidden="true" />
+                                    </span>
                                   </div>
                                 </button>
                               ))}
@@ -7350,13 +7628,14 @@ const filteredRecords = useMemo(() => {
 
                           {/* 5. Botón Limpiar */}
                           <div className="ml-auto shrink-0">
-                            <Button
-                              variant="secondary"
-                              className="flex h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 text-sm font-medium text-slate-600 shadow-sm transition-all hover:bg-slate-50 hover:text-slate-900 active:scale-95"
+                            <button
+                              type="button"
+                              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
                               onClick={clearRequestFilters}
                             >
-                              <span>Limpiar</span>
-                            </Button>
+                              <i className="ti ti-brush" style={{ fontSize: "16px" }} aria-hidden="true"></i>
+                              <span>Limpiar filtros</span>
+                            </button>
                           </div>
 
                         </div>
@@ -7523,62 +7802,71 @@ const filteredRecords = useMemo(() => {
                     className="bg-white p-6"
                     style={tabPanelAnimationStyle}
                   >
-                    <div className="mb-6 flex flex-wrap items-center gap-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-                      <span className="text-[11px] font-medium text-slate-400">Estado</span>
-                      {RECORD_STATE_LEGEND_ITEMS.map(renderLegendChip)}
-                    </div>
-
-                    <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50 p-4">
-                      <div className="flex flex-wrap items-center gap-4">
-                        <span className="text-[11px] font-medium text-slate-400">Validación</span>
-                        {RECORD_VALIDATION_LEGEND_ITEMS.map(renderLegendChip)}
-                      </div>
-                      <p className="mt-3 text-xs leading-relaxed text-slate-600">
-                        La validación resume si el fichaje es correcto, si
-                        conviene revisarlo o si presenta una anomalía técnica o
-                        de ubicación.
-                      </p>
-                    </div>
-
                     <div className="mb-6 flex flex-wrap items-end justify-between gap-4">
                       <div className="space-y-1">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
                           Equipo
                         </p>
-                        <h3 className="text-base font-semibold text-slate-900">
-                          Fichajes del equipo
-                        </h3>
+                        {/* Título con tooltip de leyenda al hacer hover */}
+                        <div className="group relative inline-block">
+                          <h3 className="inline-flex cursor-help items-center gap-1.5 text-base font-semibold text-slate-900">
+                            Fichajes del equipo
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} className="h-3.5 w-3.5 text-slate-400">
+                              <circle cx="12" cy="12" r="10" />
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 16v-4M12 8h.01" />
+                            </svg>
+                          </h3>
+                          {/* Panel de leyenda – se muestra con hover */}
+                          <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-72 origin-top-left scale-95 rounded-2xl border border-slate-200 bg-white p-4 opacity-0 shadow-xl transition-all duration-200 group-hover:pointer-events-auto group-hover:scale-100 group-hover:opacity-100">
+                            <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">Leyenda</p>
+                            {/* Estado */}
+                            <div className="mb-3">
+                              <span className="mb-1.5 block text-[11px] font-medium text-slate-500">Estado</span>
+                              <div className="flex flex-wrap gap-2">
+                                {RECORD_STATE_LEGEND_ITEMS.map(renderLegendChip)}
+                              </div>
+                            </div>
+                            {/* Validación */}
+                            <div className="border-t border-slate-100 pt-3">
+                              <span className="mb-1.5 block text-[11px] font-medium text-slate-500">Validación</span>
+                              <div className="flex flex-wrap gap-2">
+                                {RECORD_VALIDATION_LEGEND_ITEMS.map(renderLegendChip)}
+                              </div>
+                              <p className="mt-2 text-[11px] leading-relaxed text-slate-500">
+                                La validación resume si el fichaje es correcto, si conviene revisarlo o si presenta una anomalía técnica o de ubicación.
+                              </p>
+                            </div>
+                          </div>
+                        </div>
                         <p className="text-sm text-slate-600">
                           Consulta todos los fichajes registrados en el conjunto
                           filtrado actual.
                         </p>
                       </div>
-                      <div className="flex gap-2">
-                        <Button
-                          variant="secondary"
-                          className="flex items-center gap-2"
-                          onClick={exportToExcel}
-                          disabled={
-                            managerVisibleRecords.length === 0 ||
-                            !managerUserFilter
-                          }
-                        >
-                          <svg
-                            className="h-4 w-4"
-                            fill="none"
-                            viewBox="0 0 24 24"
-                            stroke="currentColor"
-                            strokeWidth={2}
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"
-                            />
-                          </svg>
-                          Descargar Excel
-                        </Button>
-                      </div>
+<div className="flex gap-2">
+  <Button
+    variant="secondary"
+    className="group flex items-center gap-2 bg-white border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 rounded-xl px-4 py-2 shadow-sm transition-all duration-300"
+    onClick={exportToExcel}
+    disabled={
+      managerVisibleRecords.length === 0 ||
+      !managerUserFilter
+    }
+  >
+    {/* Imagen con el SVG Oficial de Microsoft Excel */}
+    <img
+      src={excelIcon.src}
+      alt="Excel"
+      className="h-4 w-4 object-contain transition-all duration-300"
+      style={{
+        // Si está deshabilitado se vuelve gris y baja la opacidad, si no, se ve a todo color
+        opacity: managerVisibleRecords.length === 0 || !managerUserFilter ? 0.35 : 1,
+        filter: managerVisibleRecords.length === 0 || !managerUserFilter ? 'grayscale(1)' : 'none'
+      }}
+    />
+    <span>Descargar Excel</span>
+  </Button>
+</div>
                     </div>
                     {!managerUserFilter ? (
                       <div className="mb-4 flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
@@ -7686,49 +7974,47 @@ const filteredRecords = useMemo(() => {
                                 </td>
                                 <td className="py-4 pr-4">
                                   <div className="space-y-4">
-                                    {isCoordinatorManagerView ? (
-                                      <p>{getCoordinatorIncidentDetail(record)}</p>
-                                    ) : shouldRenderStatusDetailItems(record) ? (
-                                      <div className="flex flex-wrap gap-2">
-                                        {getStatusDetailItems(record).map((item) => (
-                                          <span
-                                            key={`${record.id}-table-detail-${item}`}
-                                            className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-4 ${getStatusDetailItemClass(record)}`}
-                                          >
-                                            {item}
-                                          </span>
-                                        ))}
-                                      </div>
-                                    ) : (
-                                      <div className="flex flex-wrap gap-2">
-                                        <span
-                                          className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-4 ${
-                                            record.status === "OPEN"
-                                              ? "border-amber-500 bg-transparent text-amber-700"
-                                              : "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                          }`}
-                                        >
-                                          {getStatusDetail(record)}
-                                        </span>
-                                      </div>
-                                    )}
-                                    <button
-                                      type="button"
-                                      className="group inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-slate-700 transition-all hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600"
-                                      onClick={() =>
-                                        setSelectedRecordForDetail(record)
-                                      }
-                                    >
-                                      <span>
-                                        {isPendingAdminValidation(record)
-                                          ? "Abrir y validar"
-                                          : "Abrir detalle"}
-                                      </span>
-                                      <span className="transition-transform group-hover:translate-x-0.5">
-                                        →
-                                      </span>
-                                    </button>
-                                  </div>
+  {isCoordinatorManagerView ? (
+    <p>{getCoordinatorIncidentDetail(record)}</p>
+  ) : shouldRenderStatusDetailItems(record) ? (
+    <div className="flex flex-wrap gap-2">
+      {getStatusDetailItems(record).map((item) => (
+        <span
+          key={`${record.id}-table-detail-${item}`}
+          className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-4 ${getStatusDetailItemClass(record)}`}
+        >
+          {item}
+        </span>
+      ))}
+    </div>
+  ) : (
+    <div className="flex flex-wrap gap-2">
+      <span
+        className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-4 ${
+          record.status === "OPEN"
+            ? "border-amber-500 bg-transparent text-amber-700"
+            : "border-emerald-200 bg-emerald-50 text-emerald-700"
+        }`}
+      >
+        {getStatusDetail(record)}
+      </span>
+    </div>
+  )}
+
+  {/* BOTÓN SUAVE, FINO Y ESTILIZADO */}
+  <button
+    type="button"
+    className={DETAIL_ACTION_BUTTON_CLASS}
+    onClick={() => setSelectedRecordForDetail(record)}
+  >
+    <span>
+      {isFunctionalAdmin && getDisplayTrustLevel(record) === "REVIEW"
+        ? "Abrir y validar"
+        : "Abrir detalle"}
+    </span>
+    <i className={DETAIL_ACTION_ICON_CLASS} aria-hidden="true" />
+  </button>
+</div>
                                 </td>
                               </tr>
                             ))}
@@ -7825,6 +8111,259 @@ const filteredRecords = useMemo(() => {
               >
                 Fichar salida
               </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {adminClosedWorkdayNotice && !openWorkdayWarning ? (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/45 px-4">
+          <div className="relative w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl">
+            <button
+              type="button"
+              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold leading-none text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              onClick={dismissAdminClosedWorkdayNotice}
+              aria-label="Cerrar aviso"
+            >
+              ×
+            </button>
+
+            <div className="flex items-start gap-4 pr-10">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 shadow-sm ring-1 ring-sky-100">
+                <i className="ti ti-clipboard-check text-[24px]" aria-hidden="true" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+                  Jornada actualizada
+                </p>
+                <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
+                  Administración ha cerrado una jornada
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Se ha completado la salida de este fichaje desde administración.
+                  Puedes revisar el detalle y el mensaje asociado.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+              <p>
+                <span className="font-semibold text-slate-900">Jornada:</span>{" "}
+                {formatShortDate(adminClosedWorkdayNotice.workDate)} ·{" "}
+                {getRecordLine(adminClosedWorkdayNotice)}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                <span className="font-semibold text-slate-900">Mensaje:</span>{" "}
+                {adminClosedWorkdayNotice.adminCloseComment ||
+                  "Jornada cerrada por administración."}
+              </p>
+            </div>
+
+<div className="mt-5 flex flex-wrap justify-end gap-2.5">
+  {/* BOTÓN ENTENDIDO */}
+  <Button
+    variant="secondary"
+    className="group flex items-center justify-center gap-1.5 bg-white border border-slate-200 text-sm font-medium !text-slate-600 hover:bg-slate-50 hover:!text-slate-800 rounded-xl px-4 py-2 shadow-sm transition-all duration-300"
+    onClick={dismissAdminClosedWorkdayNotice}
+  >
+    <svg
+      className="h-3.5 w-3.5 text-slate-400 transition-transform duration-300 group-hover:scale-110 group-hover:text-slate-600"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M4.5 12.75l6 6 9-13.5" />
+    </svg>
+    <span>Entendido</span>
+  </Button>
+
+  {/* BOTÓN VER DETALLE */}
+  <Button
+    className={DETAIL_ACTION_BUTTON_CLASS}
+    onClick={openAdminClosedWorkdayDetail}
+  >
+    <span>Ver detalle</span>
+    <i className={DETAIL_ACTION_ICON_CLASS} aria-hidden="true" />
+  </Button>
+</div>
+          </div>
+        </div>
+      ) : null}
+      {adminReviewedRequestNotice &&
+      !openWorkdayWarning &&
+      !adminClosedWorkdayNotice ? (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/45 px-4">
+          <div className="relative w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl">
+            <button
+              type="button"
+              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold leading-none text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+              onClick={dismissAdminReviewedRequestNotice}
+              aria-label="Cerrar aviso"
+            >
+              ×
+            </button>
+
+            <div className="flex items-start gap-4 pr-10">
+              <div
+                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-sm ring-1 ${
+                  adminReviewedRequestNotice.status === "APPROVED"
+                    ? "bg-emerald-50 text-emerald-700 ring-emerald-100"
+                    : "bg-rose-50 text-rose-600 ring-rose-100"
+                }`}
+              >
+                <i
+                  className={`ti ${
+                    adminReviewedRequestNotice.status === "APPROVED"
+                      ? "ti-circle-check"
+                      : "ti-circle-x"
+                  } text-[24px]`}
+                  aria-hidden="true"
+                />
+              </div>
+              <div className="min-w-0">
+                <p
+                  className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${
+                    adminReviewedRequestNotice.status === "APPROVED"
+                      ? "text-emerald-700"
+                      : "text-rose-600"
+                  }`}
+                >
+                  Solicitud revisada
+                </p>
+                <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
+                  Administración ha{" "}
+                  {adminReviewedRequestNotice.status === "APPROVED"
+                    ? "aprobado"
+                    : "rechazado"}{" "}
+                  una solicitud
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  Ya puedes consultar el estado y el comentario asociado en tus
+                  solicitudes.
+                </p>
+              </div>
+            </div>
+
+            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+              <p>
+                <span className="font-semibold text-slate-900">
+                  Solicitud:
+                </span>{" "}
+                {ADJUSTMENT_TYPE_LABELS[adminReviewedRequestNotice.requestType]} ·{" "}
+                {formatShortDate(adminReviewedRequestNotice.requestDate)} ·{" "}
+                {formatTimeOnly(adminReviewedRequestNotice.requestedTime)}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-600">
+                <span className="font-semibold text-slate-900">Respuesta:</span>{" "}
+                {adminReviewedRequestNotice.adminComment ||
+                  (adminReviewedRequestNotice.status === "APPROVED"
+                    ? "Solicitud aprobada por administración."
+                    : "Solicitud rechazada por administración.")}
+              </p>
+            </div>
+
+            <div className="mt-5 flex flex-wrap justify-end gap-2.5">
+              <Button
+                variant="secondary"
+                className={POPUP_NEUTRAL_BUTTON_CLASS}
+                onClick={dismissAdminReviewedRequestNotice}
+              >
+                Entendido
+              </Button>
+              <Button
+                className={POPUP_PRIMARY_BUTTON_CLASS}
+                onClick={openAdminReviewedRequestList}
+              >
+                Ver solicitudes
+              </Button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+      {isCoordinatorManagerView &&
+      coordinatorCalendarDetailDate &&
+      coordinatorCalendarDetailRecords.length > 0 ? (
+        <div className="fixed inset-0 z-[66] flex items-center justify-center bg-slate-950/45 px-4">
+          <div className="relative max-h-[86vh] w-full max-w-2xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-100 px-6 py-5">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-orange-600">
+                  Revisión horaria
+                </p>
+                <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
+                  {formatShortDate(coordinatorCalendarDetailDate)}
+                </h3>
+                <p className="mt-1 text-sm text-slate-500">
+                  {coordinatorCalendarDetailRecords.length}{" "}
+                  {coordinatorCalendarDetailRecords.length === 1
+                    ? "registro horario revisable"
+                    : "registros horarios revisables"}
+                  .
+                </p>
+              </div>
+              <button
+                type="button"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold leading-none text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+                onClick={() => setCoordinatorCalendarDetailDate(null)}
+                aria-label="Cerrar detalle del día"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="max-h-[64vh] space-y-3 overflow-y-auto px-6 py-5">
+              {coordinatorCalendarDetailRecords.map((record) => (
+                <div
+                  key={`coordinator-calendar-detail-${record.id}`}
+                  className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4"
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0 space-y-2">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="font-semibold text-slate-900">
+                          {getDisplayUserName(record.userId, record.userName)}
+                        </p>
+                        <span
+                          className={`${SOFT_STATUS_CHIP_CLASS} ${TRUST_LEVEL_CLASSES[getDisplayTrustLevel(record)]}`}
+                        >
+                          {getDisplayTrustLabel(record)}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-sm text-slate-600">
+                        <span>{getRecordLine(record)}</span>
+                        <span className="text-slate-300">•</span>
+                        <span>
+                          {formatHoursFromMinutes(record.workedMinutes)}{" "}
+                          computadas
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {getCoordinatorIncidentDetail(record)
+                          .split(", ")
+                          .map((item) => (
+                            <span
+                              key={`${record.id}-calendar-hour-detail-${item}`}
+                              className="inline-flex rounded-full border border-orange-200 bg-white px-3 py-1.5 text-[11px] font-semibold leading-4 text-orange-700 shadow-sm"
+                            >
+                              {item}
+                            </span>
+                          ))}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className={DETAIL_ACTION_BUTTON_CLASS}
+                      onClick={() => {
+                        setCoordinatorCalendarDetailDate(null);
+                        setSelectedRecordForDetail(record);
+                      }}
+                    >
+                      <span>Abrir detalle</span>
+                      <i className={DETAIL_ACTION_ICON_CLASS} aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         </div>
@@ -8124,241 +8663,245 @@ const filteredRecords = useMemo(() => {
         </div>
       ) : null}
       {showManagerIncidentsModal ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
-<div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
-  {/* Cabecera del Modal con Botón Corregido */}
-  <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
-    <div>
-      <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-        Revisión actual
-      </p>
-      <p className="mt-0.5 text-base font-semibold text-slate-900 tracking-tight">
-        Fichajes por revisar
-      </p>
-      <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
-        {incidentRecordDateFrom || incidentRecordDateTo ? (
-          <span>
-            Rango:{" "}
-            <span className="font-semibold text-slate-700">
-              {incidentRecordDateFrom ? formatShortDate(incidentRecordDateFrom) : "sin inicio"}
-            </span>{" "}
-            -{" "}
-            <span className="font-semibold text-slate-700">
-              {incidentRecordDateTo ? formatShortDate(incidentRecordDateTo) : "sin fin"}
+      <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
+  <div className="w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
+    {/* Cabecera del Modal con Botón Corregido */}
+    <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-100 px-5 py-4">
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+          Revisión actual
+        </p>
+        <p className="mt-0.5 text-base font-semibold text-slate-900 tracking-tight">
+          Fichajes por revisar
+        </p>
+        <div className="mt-2 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+          {incidentRecordDateFrom || incidentRecordDateTo ? (
+            <span>
+              Rango:{" "}
+              <span className="font-semibold text-slate-700">
+                {incidentRecordDateFrom ? formatShortDate(incidentRecordDateFrom) : "sin inicio"}
+              </span>{" "}
+              -{" "}
+              <span className="font-semibold text-slate-700">
+                {incidentRecordDateTo ? formatShortDate(incidentRecordDateTo) : "sin fin"}
+              </span>
             </span>
-          </span>
-        ) : (
-          <span>Mostrando todos los registros que coinciden con los filtros actuales.</span>
-        )}
-      </div>
-      
-      {/* Contenedor de Badges */}
-      <div className="mt-2 flex flex-wrap gap-2">
-        {modalManagerIncidentRecords.filter((r) => r.status === "INCIDENT").length > 0 && (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-xs font-medium text-rose-700">
-            <span className="h-1.5 w-1.5 rounded-full bg-rose-500" />
-            {modalManagerIncidentRecords.filter((r) => r.status === "INCIDENT").length} por revisar
-          </span>
-        )}
+          ) : (
+            <span>Mostrando todos los registros que coinciden con los filtros actuales.</span>
+          )}
+        </div>
         
-        {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length > 0 && (
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
-            <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
-            {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length} ausente
-            {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length !== 1 ? "s" : ""}
-          </span>
-        )}
-      </div>
-    </div>
-
-    {/* El botón Cerrar unificado y pulido */}
-    <Button
-      variant="secondary"
-      className={`${POPUP_NEUTRAL_BUTTON_CLASS} shrink-0`}
-      onClick={() => setShowManagerIncidentsModal(false)}
-    >
-      Cerrar
-    </Button>
-  </div>
-
-  {/* Cuerpo de Registros */}
-  <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
-    <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
-            Día
-          </span>
-          <span className="truncate text-xs font-semibold text-slate-700">
-            {reviewModalSelectedDate
-              ? formatShortDate(reviewModalSelectedDate)
-              : "Todos los días"}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5">
-          {reviewModalSelectedDate ? (
-            <button
-              type="button"
-              onClick={() => setReviewModalSelectedDate(null)}
-              className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
-            >
-              Ver todos
-            </button>
-          ) : null}
-          <div className="flex items-center gap-1 rounded-full bg-slate-50 px-1.5 py-1 ring-1 ring-inset ring-slate-200">
-            <button
-              type="button"
-              onClick={() =>
-                setReviewModalMonth((current) =>
-                  shiftMonthValue(current, -1),
-                )
-              }
-              className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-900 hover:shadow-sm"
-              aria-label="Mes anterior"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
-              </svg>
-            </button>
-            <span className="min-w-[104px] text-center text-xs font-bold capitalize text-slate-700">
-              {formatMonthLabel(reviewModalMonth)}
+        {/* Contenedor de Badges */}
+        <div className="mt-2 flex flex-wrap gap-2">
+          {modalManagerIncidentRecords.filter((r) => r.status === "INCIDENT").length > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-700">
+              <span className="h-1.5 w-1.5 rounded-full bg-sky-500" />
+              {modalManagerIncidentRecords.filter((r) => r.status === "INCIDENT").length} por revisar
             </span>
-            <button
-              type="button"
-              onClick={() =>
-                setReviewModalMonth((current) =>
-                  shiftMonthValue(current, 1),
-                )
-              }
-              className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-900 hover:shadow-sm"
-              aria-label="Mes siguiente"
-            >
-              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-            </button>
-          </div>
+          )}
+          
+          {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length > 0 && (
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-600">
+              <span className="h-1.5 w-1.5 rounded-full bg-slate-400" />
+              {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length} ausente
+              {modalManagerIncidentRecords.filter((r) => r.status === "INCOMPLETE").length !== 1 ? "s" : ""}
+            </span>
+          )}
         </div>
       </div>
 
-      <div className="grid grid-cols-7 gap-1 text-center">
-        {CALENDAR_WEEKDAY_LABELS.map((label, index) => (
-          <div
-            key={`review-modal-weekday-${label}`}
-            className={`text-[9px] font-bold uppercase tracking-wider ${index >= 5 ? "text-rose-400" : "text-slate-400"}`}
-          >
-            {label}
-          </div>
-        ))}
-        {reviewModalCalendarWeeks.flat().map((cell, index) => {
-          if (!cell.workDate || !cell.dayNumber) {
-            return (
-              <div
-                key={`review-modal-empty-${index}`}
-                className="h-7 rounded-lg"
-              />
-            );
-          }
-
-          const dayCount = reviewModalRecordCounts.get(cell.workDate) ?? 0;
-          const isSelected = cell.workDate === reviewModalSelectedDate;
-
-          return (
-            <button
-              key={`review-modal-day-${cell.workDate}`}
-              type="button"
-              onClick={() =>
-                setReviewModalSelectedDate((current) =>
-                  current === cell.workDate ? null : cell.workDate,
-                )
-              }
-              className={`flex h-7 flex-col items-center justify-center rounded-lg text-[11px] font-semibold transition ${
-                isSelected
-                  ? "bg-slate-900 text-white shadow-sm"
-                  : dayCount > 0
-                    ? "bg-orange-50 text-orange-700 ring-1 ring-inset ring-orange-200 hover:bg-orange-100"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
-              } ${cell.isWeekend ? "text-rose-500" : ""} ${cell.isToday && !isSelected ? "ring-2 ring-sky-100" : ""}`}
-            >
-              <span>{cell.dayNumber}</span>
-              <span
-                className={`mt-0.5 h-1 w-1 rounded-full ${
-                  dayCount > 0
-                    ? isSelected
-                      ? "bg-white"
-                      : "bg-orange-500"
-                    : "bg-transparent"
-                }`}
-              />
-            </button>
-          );
-        })}
-      </div>
+      {/* El botón Cerrar unificado y pulido */}
+      <Button
+        variant="secondary"
+        className={`${POPUP_NEUTRAL_BUTTON_CLASS} shrink-0`}
+        onClick={() => setShowManagerIncidentsModal(false)}
+      >
+        Cerrar
+      </Button>
     </div>
 
-    {modalManagerIncidentRecords.length === 0 ? (
-      <p className="text-sm text-slate-500 text-center py-4">
-        No hay registros por validar en el conjunto filtrado actualmente.
-      </p>
-    ) : (
-      <div className="space-y-2">
-        {modalManagerIncidentRecords.map((record) => (
-          <div
-            key={`manager-incident-${record.id}`}
-            className={`rounded-xl border px-4 py-3 shadow-sm transition-all ${
-              record.status === "INCOMPLETE" 
-                ? "border-slate-200 bg-white hover:border-slate-300" 
-                : "border-rose-100 bg-white hover:border-rose-200"
-            }`}
-          >
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-semibold text-slate-900">
-                {getDisplayUserName(record.userId, record.userName)}
-              </span>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
-                  record.status === "INCOMPLETE" 
-                    ? "border-slate-200 text-slate-600 bg-slate-50/50" 
-                    : "border-rose-200 text-rose-700 bg-rose-50/50"
-                }`}
-              >
-                <span className={`h-1.5 w-1.5 rounded-full ${record.status === "INCOMPLETE" ? "bg-slate-400" : "bg-rose-500"}`} />
-                {STATUS_LABELS[getDisplayRecordStatus(record)]}
-              </span>
-            </div>
-            
-            <p className="mt-1.5 text-sm text-slate-500">
-              {getRecordLine(record)}
-            </p>
-            <p className="mt-0.5 text-sm font-medium text-slate-600">
-              {isCoordinatorManagerView
-                ? getCoordinatorIncidentDetail(record)
-                : getStatusDetail(record)}
-            </p>
+    {/* Cuerpo de Registros */}
+    <div className="max-h-[60vh] overflow-y-auto px-5 py-4">
+      <div className="mb-4 rounded-2xl border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">
+              Día
+            </span>
+            <span className="truncate text-xs font-semibold text-slate-700">
+              {reviewModalSelectedDate
+                ? formatShortDate(reviewModalSelectedDate)
+                : "Todos los días"}
+            </span>
           </div>
-        ))}
-      </div>
-    )}
-  </div>
+          <div className="flex items-center gap-1.5">
+            {reviewModalSelectedDate ? (
+              <button
+                type="button"
+                onClick={() => setReviewModalSelectedDate(null)}
+                className="rounded-full px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition hover:bg-slate-50 hover:text-slate-900"
+              >
+                Ver todos
+              </button>
+            ) : null}
+            <div className="flex items-center gap-1 rounded-full bg-slate-50 px-1.5 py-1 ring-1 ring-inset ring-slate-200">
+              <button
+                type="button"
+                onClick={() =>
+                  setReviewModalMonth((current) =>
+                    shiftMonthValue(current, -1),
+                  )
+                }
+                className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-900 hover:shadow-sm"
+                aria-label="Mes anterior"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+                </svg>
+              </button>
+              <span className="min-w-[104px] text-center text-xs font-bold capitalize text-slate-700">
+                {formatMonthLabel(reviewModalMonth)}
+              </span>
+              <button
+                type="button"
+                onClick={() =>
+                  setReviewModalMonth((current) =>
+                    shiftMonthValue(current, 1),
+                  )
+                }
+                className="flex h-7 w-7 items-center justify-center rounded-full text-slate-500 transition hover:bg-white hover:text-slate-900 hover:shadow-sm"
+                aria-label="Mes siguiente"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </div>
 
-  {/* Pie de página informativo */}
-  <div className="flex items-center gap-2.5 border-t border-slate-100 px-5 py-3.5 bg-slate-50/30 rounded-b-2xl">
-    <svg
-      className="h-4 w-4 shrink-0 text-slate-400"
-      fill="none"
-      viewBox="0 0 24 24"
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-    <p className="text-xs text-slate-400 leading-normal">
-      Las justificaciones enviadas por los trabajadores aparecerán en{" "}
-      <span className="font-semibold text-slate-500">Revisión</span> para su revisión.
-    </p>
+        <div className="grid grid-cols-7 gap-1 text-center">
+          {CALENDAR_WEEKDAY_LABELS.map((label, index) => (
+            <div
+              key={`review-modal-weekday-${label}`}
+              className={`text-[9px] font-bold uppercase tracking-wider ${index >= 5 ? "text-rose-400" : "text-slate-400"}`}
+            >
+              {label}
+            </div>
+          ))}
+          {reviewModalCalendarWeeks.flat().map((cell, index) => {
+            if (!cell.workDate || !cell.dayNumber) {
+              return (
+                <div
+                  key={`review-modal-empty-${index}`}
+                  className="h-7 rounded-lg"
+                />
+              );
+            }
+
+            const dayCount = reviewModalRecordCounts.get(cell.workDate) ?? 0;
+            const isSelected = cell.workDate === reviewModalSelectedDate;
+
+            return (
+              <button
+                key={`review-modal-day-${cell.workDate}`}
+                type="button"
+                onClick={() =>
+                  setReviewModalSelectedDate((current) =>
+                    current === cell.workDate ? null : cell.workDate,
+                  )
+                }
+                className={`flex h-7 flex-col items-center justify-center rounded-lg text-[11px] font-semibold transition ${
+                  isSelected
+                    ? "bg-slate-900 text-white shadow-sm"
+                    : dayCount > 0
+                      ? "bg-sky-50 text-sky-700 ring-1 ring-inset ring-sky-200 hover:bg-sky-100"
+                      : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"
+                } ${cell.isWeekend ? "text-rose-500" : ""} ${cell.isToday && !isSelected ? "ring-2 ring-sky-100" : ""}`}
+              >
+                <span>{cell.dayNumber}</span>
+                <span
+                  className={`mt-0.5 h-1 w-1 rounded-full ${
+                    dayCount > 0
+                      ? isSelected
+                        ? "bg-white"
+                        : "bg-sky-500"
+                      : "bg-transparent"
+                  }`}
+                />
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
+      {modalManagerIncidentRecords.length === 0 ? (
+        <p className="text-sm text-slate-500 text-center py-4">
+          No hay registros horarios revisables en el conjunto filtrado actualmente.
+        </p>
+      ) : (
+        <div className="space-y-2">
+          {modalManagerIncidentRecords.map((record) => (
+            <div
+              key={`manager-incident-${record.id}`}
+              className={`rounded-xl border px-4 py-3 shadow-sm transition-all ${
+                record.status === "INCOMPLETE" 
+                  ? "border-slate-200 bg-white hover:border-slate-300" 
+                  : "border-sky-100 bg-white hover:border-sky-200"
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-sm font-semibold text-slate-900">
+                  {getDisplayUserName(record.userId, record.userName)}
+                </span>
+                
+                {/* ETIQUETA CORREGIDA: Fuerza el texto "Revisar" para los incidentes */}
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
+                    record.status === "INCOMPLETE" 
+                      ? "border-slate-200 text-slate-600 bg-slate-50/50" 
+                      : "border-sky-200 text-sky-700 bg-sky-50/50"
+                  }`}
+                >
+                  <span className={`h-1.5 w-1.5 rounded-full ${record.status === "INCOMPLETE" ? "bg-slate-400" : "bg-sky-500"}`} />
+                  {record.status === "INCOMPLETE" 
+                    ? STATUS_LABELS[getDisplayRecordStatus(record)] 
+                    : "Revisar"}
+                </span>
+              </div>
+              
+              <p className="mt-1.5 text-sm text-slate-500">
+                {getRecordLine(record)}
+              </p>
+              <p className="mt-0.5 text-sm font-medium text-slate-600">
+                {isCoordinatorManagerView
+                  ? getCoordinatorIncidentDetail(record)
+                  : getStatusDetail(record)}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+
+    {/* Pie de página informativo */}
+    <div className="flex items-center gap-2.5 border-t border-slate-100 px-5 py-3.5 bg-slate-50/30 rounded-b-2xl">
+      <svg
+        className="h-4 w-4 shrink-0 text-slate-400"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
+        <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <p className="text-xs text-slate-400 leading-normal">
+        Las justificaciones enviadas por los trabajadores aparecerán en{" "}
+        <span className="font-semibold text-slate-500">Revisión</span> para su revisión.
+      </p>
+    </div>
   </div>
 </div>
-        </div>
       ) : null}
       {selectedDetailDate && selectedDetailRecords.length > 0 ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
@@ -8427,77 +8970,104 @@ const filteredRecords = useMemo(() => {
         </div>
       ) : null}
       {isWorkerMode && selectedIncidentRecordId ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4">
-              <div className="space-y-1">
-                <h3 className="text-base font-semibold text-slate-900">
-                  Justificar anomalía
-                </h3>
-                <p className="text-sm text-slate-600">
-                  Explica el motivo para que coordinación y administración
-                  puedan revisarlo.
-                </p>
-              </div>
-              <Button
-                variant="secondary"
-                className={POPUP_NEUTRAL_BUTTON_CLASS}
-                onClick={() => {
-                  setSelectedIncidentRecordId(null);
-                  setIncidentJustificationReason("");
-                }}
-              >
-                Cerrar
-              </Button>
-            </div>
+<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 backdrop-blur-sm transition-opacity duration-300">
+  <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
+    
+    {/* CABECERA: Tonos Sky suaves y tranquilos */}
+    <div className="flex items-start gap-4 border-b border-sky-100 bg-sky-50/60 px-6 py-5">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700 shadow-sm ring-4 ring-sky-50">
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      </div>
+      <div className="space-y-1">
+        <h3 className="text-lg font-semibold text-slate-900">
+          Justificar <span className="text-sky-700">anomalía</span>
+        </h3>
+        <p className="text-sm text-slate-500">
+          Explica el motivo para que coordinación y administración puedan revisarlo.
+        </p>
+      </div>
+    </div>
 
-            <div className="mt-4 space-y-4">
-              <div className="space-y-2">
-                <label
-                  className="block text-sm font-medium text-slate-700"
-                  htmlFor="incidentJustificationReason"
-                >
-                  Motivo *
-                </label>
-                <textarea
-                  id="incidentJustificationReason"
-                  className="min-h-[120px] w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-slate-400"
-                  required
-                  value={incidentJustificationReason}
-                  onChange={(event) =>
-                    setIncidentJustificationReason(event.target.value)
-                  }
-                />
-                <p className="text-xs text-slate-500">
-                  Describe qué ocurrió y cualquier contexto útil para la
-                  revisión.
-                </p>
-              </div>
+    {/* CUERPO: Formulario con focus en Sky */}
+    <div className="px-6 py-5 space-y-4">
+      <div className="space-y-2">
+        <label className="block text-sm font-medium text-slate-700" htmlFor="incidentJustificationReason">
+          Motivo <span className="text-red-500">*</span>
+        </label>
+        <textarea
+          id="incidentJustificationReason"
+          className="min-h-[120px] w-full resize-y rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-900 placeholder-slate-400 shadow-sm outline-none transition-all duration-200 focus:border-sky-500 focus:ring-1 focus:ring-sky-500"
+          required
+          value={incidentJustificationReason}
+          onChange={(event) => setIncidentJustificationReason(event.target.value)}
+        />
+        <p className="text-xs text-slate-500">
+          Describe qué ocurrió y cualquier contexto útil para la revisión.
+        </p>
+      </div>
+    </div>
 
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="secondary"
-                  className={POPUP_NEUTRAL_BUTTON_CLASS}
-                  onClick={() => {
-                    setSelectedIncidentRecordId(null);
-                    setIncidentJustificationReason("");
-                  }}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  className={POPUP_PRIMARY_BUTTON_CLASS}
-                  disabled={incidentJustificationSubmitting}
-                  onClick={submitIncidentJustification}
-                >
-                  {incidentJustificationSubmitting
-                    ? "Enviando..."
-                    : "Enviar justificación"}
-                </Button>
-              </div>
-            </div>
-          </div>
-        </div>
+    {/* PIE: Botones con Iconos */}
+    <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+      <button
+        type="button"
+        onClick={() => {
+          setSelectedIncidentRecordId(null);
+          setIncidentJustificationReason("");
+        }}
+        className="group flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:bg-slate-50 hover:text-slate-900 active:scale-95"
+      >
+        <svg
+          className="h-3.5 w-3.5 text-slate-400 transition-transform duration-300 group-hover:scale-110"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+        </svg>
+        <span>Cancelar</span>
+      </button>
+      
+      <button
+        type="button"
+        disabled={incidentJustificationSubmitting}
+        onClick={submitIncidentJustification}
+        className="group flex items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700 shadow-sm transition-all duration-300 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {incidentJustificationSubmitting ? (
+          <>
+            <svg className="h-4 w-4 animate-spin text-sky-600" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <span>Enviando...</span>
+          </>
+        ) : (
+          <>
+            <svg
+              className="h-3.5 w-3.5 text-sky-600 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-12"
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5"
+              />
+            </svg>
+            <span>Enviar justificación</span>
+          </>
+        )}
+      </button>
+    </div>
+
+  </div>
+</div>
       ) : null}
       {isWorkerMode && incidentJustificationToDelete ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
@@ -8547,25 +9117,57 @@ const filteredRecords = useMemo(() => {
                 ¿Seguro que quieres ocultar esta respuesta?
               </p>
 
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="secondary"
-                  className={POPUP_NEUTRAL_BUTTON_CLASS}
-                  onClick={() => setIncidentJustificationToDelete(null)}
-                  disabled={Boolean(deletingIncidentJustificationId)}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  className={POPUP_DANGER_BUTTON_CLASS}
-                  onClick={deleteIncidentJustification}
-                  disabled={Boolean(deletingIncidentJustificationId)}
-                >
-                  {deletingIncidentJustificationId
-                    ? "Eliminando..."
-                    : "Eliminar"}
-                </Button>
-              </div>
+<div className="flex justify-end gap-2.5">
+  {/* BOTÓN CANCELAR */}
+  <Button
+    variant="secondary"
+    className="group flex items-center justify-center gap-1.5 bg-white border border-slate-200 text-sm font-medium !text-slate-600 hover:bg-slate-50 hover:!text-slate-800 rounded-xl px-4 py-2 shadow-sm transition-all duration-300"
+    onClick={() => setIncidentJustificationToDelete(null)}
+    disabled={Boolean(deletingIncidentJustificationId)}
+  >
+    <svg
+      className="h-3.5 w-3.5 text-slate-400 transition-transform duration-300 group-hover:-translate-x-0.5 group-hover:text-slate-600"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+    </svg>
+    <span>Cancelar</span>
+  </Button>
+
+  {/* BOTÓN ELIMINAR: Forzando el texto gris con !text-slate-600 y variant="secondary" */}
+  <Button
+    variant="secondary"
+    className="group flex items-center justify-center gap-2 bg-white border border-red-200 text-sm font-medium !text-slate-600 hover:!text-slate-800 hover:!bg-red-50 rounded-xl px-4 py-2 shadow-sm transition-all duration-300 disabled:opacity-50"
+    onClick={deleteIncidentJustification}
+    disabled={Boolean(deletingIncidentJustificationId)}
+  >
+    {deletingIncidentJustificationId ? (
+      <>
+        <svg className="animate-spin h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+        <span>Eliminando...</span>
+      </>
+    ) : (
+      <>
+        <svg
+          className="h-4 w-4 text-red-500 transition-transform duration-300 group-hover:scale-105"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" />
+        </svg>
+        <span>Eliminar</span>
+      </>
+    )}
+  </Button>
+</div>
             </div>
           </div>
         </div>
@@ -8640,23 +9242,59 @@ const filteredRecords = useMemo(() => {
                 </p>
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="secondary"
-                  className={POPUP_NEUTRAL_BUTTON_CLASS}
-                  onClick={closeAdminCloseModal}
-                  disabled={adminCloseSubmitting}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  className={POPUP_PRIMARY_BUTTON_CLASS}
-                  onClick={closeRecordAsAdmin}
-                  disabled={adminCloseSubmitting}
-                >
-                  {adminCloseSubmitting ? "Cerrando..." : "Cerrar jornada"}
-                </Button>
-              </div>
+              <div className="flex justify-end gap-2.5">
+  {/* BOTÓN CANCELAR: El mismo diseño neutro y limpio que ya estandarizamos */}
+  <Button
+    variant="secondary"
+    className="group flex items-center justify-center gap-1.5 bg-white border border-slate-200 text-sm font-medium !text-slate-600 hover:bg-slate-50 hover:!text-slate-800 rounded-xl px-4 py-2 shadow-sm transition-all duration-300"
+    onClick={closeAdminCloseModal}
+    disabled={adminCloseSubmitting}
+  >
+    <svg
+      className="h-3.5 w-3.5 text-slate-400 transition-transform duration-300 group-hover:-translate-x-0.5 group-hover:text-slate-600"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={1.5}
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+    </svg>
+    <span>Cancelar</span>
+  </Button>
+
+  {/* BOTÓN CERRAR JORNADA: Estilo Primario Sólido para confirmar la acción */}
+  <Button
+    className="group flex items-center justify-center gap-2 bg-slate-800 hover:bg-slate-900 border border-transparent text-sm font-medium text-white rounded-xl px-4 py-2 shadow-sm transition-all duration-300 disabled:opacity-50"
+    onClick={closeRecordAsAdmin}
+    disabled={adminCloseSubmitting}
+  >
+    {adminCloseSubmitting ? (
+      <>
+        {/* Spinner animado en color claro durante la carga */}
+        <svg className="animate-spin h-4 w-4 text-slate-300" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+        <span>Cerrando...</span>
+      </>
+    ) : (
+      <>
+        {/* Candado de cierre para reforzar la idea de seguridad */}
+        <svg
+          className="h-4 w-4 text-slate-300 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={1.5}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 10.5V6.75a4.5 4.5 0 10-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 002.25-2.25v-6.75a2.25 2.25 0 00-2.25-2.25H6.75a2.25 2.25 0 00-2.25 2.25v6.75a2.25 2.25 0 002.25 2.25z" />
+          <path strokeLinecap="round" strokeLinejoin="round" d="M10.5 14.25l1.5 1.5 3-3" />
+        </svg>
+        <span>Cerrar jornada</span>
+      </>
+    )}
+  </Button>
+</div>
             </div>
           </div>
         </div>
@@ -8697,53 +9335,117 @@ const filteredRecords = useMemo(() => {
                 </div>
               </div>
 
-              <div className="mt-4 space-y-4">
-                <div className="rounded-2xl border border-amber-100 bg-gradient-to-br from-amber-50/80 to-white p-4 text-sm text-slate-700 shadow-sm">
-                  <div className="space-y-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-600">
-                      Solicitud
-                    </p>
-                    <p className="font-medium text-slate-900">
-                      {ADJUSTMENT_TYPE_LABELS[adjustmentRequestToDelete.requestType]} ·{" "}
-                      {formatShortDate(adjustmentRequestToDelete.requestDate)} ·{" "}
-                      {formatTimeOnly(adjustmentRequestToDelete.requestedTime)}
-                    </p>
-                  </div>
+<div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 px-4 backdrop-blur-sm transition-opacity duration-300">
+  <div className="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl ring-1 ring-slate-200">
+    
+    {/* CABECERA: Tonos Sky suaves y tranquilos, consistentes con la ventana anterior */}
+    <div className="flex items-start gap-4 border-b border-sky-100 bg-sky-50/60 px-6 py-5">
+      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700 shadow-sm ring-4 ring-sky-50">
+        <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+        </svg>
+      </div>
+      <div className="space-y-1">
+        <h3 className="text-lg font-semibold text-slate-900">
+          Ocultar <span className="text-sky-700">solicitud</span>
+        </h3>
+        <p className="text-sm text-slate-500">
+          Esta acción quitará la solicitud seleccionada de tu vista principal.
+        </p>
+      </div>
+    </div>
 
-                  <div className="mt-3 space-y-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-amber-600">
-                      Motivo enviado
-                    </p>
-                    <p className="leading-6 text-slate-700">
-                      {adjustmentRequestToDelete.reason}
-                    </p>
-                  </div>
-                </div>
+    {/* CUERPO: Detalles de la solicitud con tarjeta minimalista */}
+    <div className="px-6 py-5 space-y-4">
+      <div className="rounded-xl border border-slate-100 bg-slate-50/70 p-4 shadow-inner">
+        <div className="space-y-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+            Solicitud
+          </p>
+          <p className="text-sm font-semibold text-slate-800">
+            {ADJUSTMENT_TYPE_LABELS[adjustmentRequestToDelete.requestType]} ·{" "}
+            {formatShortDate(adjustmentRequestToDelete.requestDate)} ·{" "}
+            {formatTimeOnly(adjustmentRequestToDelete.requestedTime)}
+          </p>
+        </div>
 
-                <p className="text-sm font-medium text-slate-700">
-                  ¿Seguro que quieres ocultar esta solicitud?
-                </p>
+        <div className="mt-3.5 pt-3 border-t border-slate-200/60 space-y-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-slate-400">
+            Motivo enviado
+          </p>
+          <p className="text-sm leading-relaxed text-slate-600 bg-white/60 rounded-lg p-2.5 border border-slate-200/40">
+            {adjustmentRequestToDelete.reason}
+          </p>
+        </div>
+      </div>
 
-                <div className="flex justify-end gap-2">
-                <Button
-                  variant="secondary"
-                  className={POPUP_NEUTRAL_BUTTON_CLASS}
-                  onClick={() => setAdjustmentRequestToDelete(null)}
-                  disabled={Boolean(deletingAdjustmentRequestId)}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  className={POPUP_DANGER_BUTTON_CLASS}
-                  onClick={deleteAdjustmentRequest}
-                  disabled={Boolean(deletingAdjustmentRequestId)}
-                >
-                  {deletingAdjustmentRequestId
-                    ? "Ocultando..."
-                    : "Ocultar"}
-                </Button>
-              </div>
-            </div>
+      <p className="text-sm font-medium text-slate-700 text-center pt-1">
+        ¿Seguro que quieres ocultar esta solicitud?
+      </p>
+    </div>
+
+    {/* PIE: Botones de Acción Estilizados */}
+    <div className="flex items-center justify-end gap-3 border-t border-slate-100 bg-slate-50 px-6 py-4">
+      
+      {/* BOTÓN CANCELAR: Base neutra */}
+      <button
+        type="button"
+        disabled={Boolean(deletingAdjustmentRequestId)}
+        onClick={() => setAdjustmentRequestToDelete(null)}
+        className="group flex items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-all duration-300 hover:bg-slate-50 hover:text-slate-900 active:scale-95 disabled:opacity-50"
+      >
+        <svg
+          className="h-3.5 w-3.5 text-slate-400 transition-transform duration-300 group-hover:-translate-x-0.5 group-hover:text-slate-600"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 15L3 9m0 0l6-6M3 9h12a6 6 0 010 12h-3" />
+        </svg>
+          <span>Cancelar</span>
+      </button>
+
+      {/* BOTÓN CONFIRMAR (OCULTAR): Sólido Sky */}
+<button
+  type="button"
+  disabled={Boolean(deletingAdjustmentRequestId)}
+  onClick={deleteAdjustmentRequest}
+  className="group flex items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-white px-4 py-2 text-sm font-semibold text-sky-700 shadow-sm transition-all duration-300 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
+>
+  {deletingAdjustmentRequestId ? (
+    <>
+      {/* Spinner animado en color Sky */}
+      <svg className="h-4 w-4 animate-spin text-sky-600" fill="none" viewBox="0 0 24 24">
+        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+      </svg>
+      <span>Ocultando...</span>
+    </>
+  ) : (
+    <>
+      {/* Icono de ojo tachado con micro-interacción de escala, en color Sky */}
+      <svg
+        className="h-4 w-4 text-sky-600 transition-transform duration-300 group-hover:scale-110"
+        fill="none"
+        viewBox="0 0 24 24"
+        stroke="currentColor"
+        strokeWidth={2}
+      >
+        <path 
+          strokeLinecap="round" 
+          strokeLinejoin="round" 
+          d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" 
+        />
+      </svg>
+      <span>Ocultar</span>
+    </>
+  )}
+</button>
+    </div>
+
+  </div>
+</div>
           </div>
         </div>
       ) : null}
@@ -8874,6 +9576,9 @@ const filteredRecords = useMemo(() => {
         open={!!selectedRecordForDetail}
         onClose={() => setSelectedRecordForDetail(null)}
         title="Detalle del Fichaje"
+        panelClassName={
+          isManagerMode && isFunctionalAdmin ? "max-w-4xl" : "max-w-lg"
+        }
       >
         {selectedRecordForDetail &&
           renderRecordDetailContent(selectedRecordForDetail)}

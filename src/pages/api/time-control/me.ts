@@ -25,11 +25,13 @@ export const GET: APIRoute = withApiError(async (context) => {
   const dateFrom = context.url.searchParams.get("dateFrom") ?? undefined;
   const dateTo = context.url.searchParams.get("dateTo") ?? undefined;
   const status = parseStatus(context.url.searchParams.get("status"));
+  const includeOpen = context.url.searchParams.get("includeOpen") === "1";
 
   const items = await timeControlService.getMyRecords(user, {
     dateFrom,
     dateTo,
     status,
+    includeOpen,
   });
 
   return jsonOk({ items });

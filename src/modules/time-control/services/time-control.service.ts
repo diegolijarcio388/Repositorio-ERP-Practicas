@@ -794,6 +794,12 @@ export class TimeControlService implements WorkdayRecordsService {
     filters?: Omit<WorkdayFilters, "userId">,
   ): Promise<WorkdayRecord[]> {
     const records = await this.repository.listByUser(user.userId, filters);
+    if (filters?.includeOpen) {
+      const openRecord = await this.repository.findOpenByUserId(user.userId);
+      if (openRecord && !records.some((record) => record.id === openRecord.id)) {
+        records.unshift(openRecord);
+      }
+    }
     return this.decorateRecords(records);
   }
 

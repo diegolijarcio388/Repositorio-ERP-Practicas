@@ -31,6 +31,7 @@ export function WorkerTimeControlWorkspace({
         session={session}
         mode="worker"
         workerView={activeTab}
+        onWorkerViewChange={setActiveTab}
         headerSlot={
           <div className="space-y-4">
             <div className="rounded-3xl border border-stone-200 bg-white p-6 shadow-sm">

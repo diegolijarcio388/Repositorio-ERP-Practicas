@@ -127,7 +127,7 @@ const adminSidebarSections = [
     items: adminGeneralNavItems, 
   },
   {
-    title: "MÓDULO TRABAJADORES",
+    title: "MÓDULO FICHAJES",
     items: canAccessTimeControlManagement
       ? [{ label: "Control de Trabajadores", href: "/control-horario/gestion" }] 
       : [],
@@ -214,21 +214,29 @@ const coordinatorNavSections = coordinatorSections;
 
     {!isPublic && (
       <div class="min-h-screen flex flex-col md:flex-row">
-        <!-- Sidebar / Drawer -->
         <aside 
           id="sidebar"
-          class="fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-slate-200 transform -translate-x-full transition-transform duration-300 ease-in-out md:translate-x-0 md:static md:inset-auto"
+          class="fixed inset-y-0 left-0 z-50 w-[86vw] max-w-72 shrink-0 bg-white border-r border-slate-200 transform -translate-x-full transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:w-72 md:translate-x-0 md:inset-auto"
         >
           <div class="flex flex-col h-full">
-            <div class="p-6 border-b border-slate-100 flex items-center justify-between">
-              <a href="/dashboard" class="flex items-center gap-2">
-                <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center">
+            <div class="p-5 border-b border-slate-100 flex items-center justify-between gap-2">
+              <a href="/dashboard" class="flex items-center gap-2 min-w-0">
+                <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
                   <span class="text-white font-bold text-lg">C</span>
                 </div>
-                <span class="font-bold text-slate-900 tracking-tight">cetemet-control</span>
+                <span class="font-bold text-slate-900 tracking-tight truncate">cetemet-control</span>
               </a>
-              <button id="close-sidebar" class="md:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg">
-                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+              
+              <button 
+                id="close-sidebar" 
+                class="group p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 border border-slate-100 rounded-lg transition-all active:scale-95 shadow-sm shrink-0 flex items-center justify-center"
+                aria-label="Ocultar menú lateral"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-300 group-hover:-translate-x-0.5">
+                  <rect width="18" height="18" x="3" y="3" rx="2" />
+                  <path d="M9 3v16" />
+                  <path d="m16 15-3-3 3-3" />
+                </svg>
               </button>
             </div>
 
@@ -291,7 +299,6 @@ const coordinatorNavSections = coordinatorSections;
                 </nav>
               ))}
 
-
                 </>
               )}
             </div>
@@ -310,19 +317,23 @@ const coordinatorNavSections = coordinatorSections;
           </div>
         </aside>
 
-        <!-- Backdrop for mobile -->
         <div id="sidebar-backdrop" class="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm hidden md:hidden"></div>
 
         <div class="flex-1 flex flex-col min-w-0">
           <header class="sticky top-0 z-40 border-b border-slate-200 bg-white/80 backdrop-blur-md">
             <div class="flex items-center justify-between gap-3 px-4 py-3 md:px-6">
               <div class="flex min-w-0 items-center gap-2 md:gap-3">
+                
                 <button 
                   id="toggle-sidebar"
-                  class="p-2 text-slate-600 hover:bg-slate-50 rounded-lg md:hidden"
-                  aria-label="Abrir menú"
+                  class="group p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 border border-transparent hover:border-slate-200 rounded-lg transition-all active:scale-95 flex items-center justify-center bg-white shadow-sm ring-1 ring-slate-100 shrink-0"
+                  aria-label="Mostrar menú lateral"
                 >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-300 group-hover:translate-x-0.5">
+                    <rect width="18" height="18" x="3" y="3" rx="2" />
+                    <path d="M9 3v16" />
+                    <path d="m14 9 3 3-3 3" />
+                  </svg>
                 </button>
                 
                 <div class="flex items-center md:hidden">
@@ -367,7 +378,7 @@ const coordinatorNavSections = coordinatorSections;
               </div>
             </div>
           </header>
-          <main class="flex-1 p-4 md:p-8">
+          <main class="flex-1 px-3 py-4 sm:p-4 md:p-6 xl:p-8">
             <slot />
           </main>
         </div>
@@ -379,8 +390,56 @@ const coordinatorNavSections = coordinatorSections;
       const toggleBtn = document.getElementById("toggle-sidebar");
       const closeBtn = document.getElementById("close-sidebar");
 
+      const desktopSidebarStorageKey = "cetemet:sidebar-hidden";
+
+      function isDesktopSidebar() {
+        return window.innerWidth >= 768;
+      }
+
+      // NUEVO: Función para sincronizar la visibilidad del botón de abrir (Header)
+      function syncToggleBtn() {
+        if (!toggleBtn) return;
+        let isHidden = false;
+        
+        // Comprobamos si el menú está oculto dependiendo de si estamos en PC o Móvil
+        if (isDesktopSidebar()) {
+          isHidden = document.body.classList.contains("sidebar-desktop-hidden");
+        } else {
+          isHidden = sidebar.classList.contains("-translate-x-full");
+        }
+
+        // Si el menú está oculto, mostramos el botón de abrir. Si no, lo escondemos.
+        if (isHidden) {
+          toggleBtn.style.display = "flex";
+        } else {
+          toggleBtn.style.display = "none";
+        }
+      }
+
+      function setDesktopSidebarHidden(isHidden: boolean) {
+        document.body.classList.toggle("sidebar-desktop-hidden", isHidden);
+        try {
+          window.localStorage.setItem(
+            desktopSidebarStorageKey,
+            isHidden ? "1" : "0",
+          );
+        } catch {
+          // El menú sigue funcionando aunque localStorage no esté disponible.
+        }
+        // NUEVO: Sincronizar botón al cambiar en PC
+        syncToggleBtn();
+      }
+
       function toggleSidebar() {
         if (!sidebar || !backdrop) return;
+
+        if (isDesktopSidebar()) {
+          setDesktopSidebarHidden(
+            !document.body.classList.contains("sidebar-desktop-hidden"),
+          );
+          return;
+        }
+
         const isOpen = !sidebar.classList.contains("-translate-x-full");
         
         if (isOpen) {
@@ -392,11 +451,24 @@ const coordinatorNavSections = coordinatorSections;
           backdrop.classList.remove("hidden");
           document.body.classList.add("overflow-hidden");
         }
+        // NUEVO: Sincronizar botón al cambiar en móvil
+        syncToggleBtn();
       }
 
       toggleBtn?.addEventListener("click", toggleSidebar);
       closeBtn?.addEventListener("click", toggleSidebar);
       backdrop?.addEventListener("click", toggleSidebar);
+
+      try {
+        if (window.localStorage.getItem(desktopSidebarStorageKey) === "1") {
+          document.body.classList.add("sidebar-desktop-hidden");
+        }
+      } catch {
+        // Preferimos mostrar el menú si no se puede leer la preferencia.
+      }
+
+      // NUEVO: Ejecución inicial para revisar cómo arranca el panel
+      syncToggleBtn();
 
       // Cerrar al redimensionar si pasamos a desktop
       window.addEventListener("resize", () => {
@@ -405,8 +477,13 @@ const coordinatorNavSections = coordinatorSections;
           backdrop?.classList.add("hidden");
           document.body.classList.remove("overflow-hidden");
         }
+        if (window.innerWidth < 768) {
+          document.body.classList.remove("sidebar-desktop-hidden");
+        }
+        // NUEVO: Sincronizar botón si el usuario cambia el tamaño de la ventana
+        syncToggleBtn();
       });
-    </script>
+</script>
     <style is:global>
       .custom-scrollbar::-webkit-scrollbar {
         width: 4px;
@@ -430,6 +507,12 @@ const coordinatorNavSections = coordinatorSections;
       .scrollbar-hide {
         -ms-overflow-style: none;
         scrollbar-width: none;
+      }
+
+      @media (min-width: 768px) {
+        body.sidebar-desktop-hidden #sidebar {
+          display: none;
+        }
       }
     </style>
   </body>
