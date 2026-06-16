@@ -3,8 +3,10 @@ import type { AuthenticatedApiUser } from "../../vacations/domain/types";
 import { createDirectoryRepository } from "../../vacations/repositories/directory.repository";
 import type {
   CreatePermissionRequestInput,
+  LegalPermissionType,
   PermissionRequestFilters,
   PermissionRequestRecord,
+  PermissionRequestedUnitType,
   PermissionRequestStatus,
 } from "../domain/types";
 import {
@@ -16,9 +18,55 @@ interface CreateManualPermissionInput {
   userId: string;
   permissionDate: string;
   reason: string;
+  legalPermissionType?: LegalPermissionType | null;
+  attachmentUrl?: string | null;
   status?: PermissionRequestStatus;
   approverComment?: string;
 }
+
+const PERMISSION_RULES: Record<
+  LegalPermissionType,
+  { units: number | null; unitType: PermissionRequestedUnitType; label: string }
+> = {
+  MEDICAL: {
+    units: null,
+    unitType: "INDISPENSABLE_TIME",
+    label: "Tiempo indispensable si es por Seguridad Social.",
+  },
+  MARRIAGE: {
+    units: 15,
+    unitType: "NATURAL_DAYS",
+    label: "15 días naturales.",
+  },
+  DEATH_SPOUSE_PARENT_CHILD: {
+    units: 4,
+    unitType: "WORKING_DAYS",
+    label: "4 días laborables.",
+  },
+  HOSPITALIZATION_OR_SECOND_DEGREE: {
+    units: 2,
+    unitType: "WORKING_DAYS",
+    label: "2 días laborables, 4 si hay desplazamiento superior a 200 km.",
+  },
+  MOVING: {
+    units: 1,
+    unitType: "WORKING_DAYS",
+    label: "1 día laborable.",
+  },
+  PUBLIC_DUTY: {
+    units: null,
+    unitType: "INDISPENSABLE_TIME",
+    label: "Tiempo indispensable para deber público inexcusable.",
+  },
+  EXAM: {
+    units: null,
+    unitType: "INDISPENSABLE_TIME",
+    label: "Tiempo indispensable.",
+  },
+};
+
+const resolvePermissionRule = (type?: LegalPermissionType | null) =>
+  type ? PERMISSION_RULES[type] : null;
 
 const normalizeSqlDate = (value: string): string => {
   const trimmed = value.trim();
@@ -72,7 +120,12 @@ export interface PermissionsService {
   ): Promise<PermissionRequestRecord[]>;
   createRequest(
     user: AuthenticatedApiUser,
-    input: { permissionDate: string; reason: string },
+    input: {
+      permissionDate: string;
+      reason: string;
+      legalPermissionType?: LegalPermissionType | null;
+      attachmentUrl?: string | null;
+    },
   ): Promise<PermissionRequestRecord>;
   createManualPermission(
     user: AuthenticatedApiUser,
@@ -195,11 +248,21 @@ export class PermissionsServiceImpl implements PermissionsService {
       throw new Error("FORBIDDEN");
     }
     const allowedUsers = await this.getAllowedUsersForManagement(user);
-    const items = await this.repository.listFiltered({
-      status: "PENDING_ADMIN",
-      userIds: allowedUsers.map((entry) => entry.id),
-    });
-    return this.attachUserNames(items);
+    const userIds = allowedUsers.map((entry) => entry.id);
+    const [coordinatorPendingItems, adminPendingItems] = await Promise.all([
+      this.repository.listFiltered({
+        status: "PENDING_COORDINATOR",
+        userIds,
+      }),
+      this.repository.listFiltered({
+        status: "PENDING_ADMIN",
+        userIds,
+      }),
+    ]);
+    return this.attachUserNames([
+      ...adminPendingItems,
+      ...coordinatorPendingItems,
+    ]);
   }
 
   async listManagementPermissions(
@@ -248,12 +311,17 @@ export class PermissionsServiceImpl implements PermissionsService {
     const reason = input.reason.trim();
     if (!reason) throw new Error("Debes indicar un motivo para el permiso.");
     const status = input.status ?? "APPROVED";
+    const rule = resolvePermissionRule(input.legalPermissionType);
     const payload: CreatePermissionRequestInput = {
       id: `prm-${crypto.randomUUID()}`,
       userId: targetUser.id,
       departmentId: targetUser.departmentId,
       permissionDate: normalizeSqlDate(input.permissionDate),
       permissionType: "FULL_DAY",
+      legalPermissionType: input.legalPermissionType ?? null,
+      attachmentUrl: input.attachmentUrl?.trim() || null,
+      requestedUnits: rule?.units ?? null,
+      requestedUnitType: rule?.unitType ?? null,
       reason,
       status,
       approverId:
@@ -267,7 +335,12 @@ export class PermissionsServiceImpl implements PermissionsService {
 
   async createRequest(
     user: AuthenticatedApiUser,
-    input: { permissionDate: string; reason: string },
+    input: {
+      permissionDate: string;
+      reason: string;
+      legalPermissionType?: LegalPermissionType | null;
+      attachmentUrl?: string | null;
+    },
   ): Promise<PermissionRequestRecord> {
     const reason = input.reason.trim();
     if (!reason) throw new Error("Debes indicar un motivo para el permiso.");
@@ -276,12 +349,17 @@ export class PermissionsServiceImpl implements PermissionsService {
       throw new Error("No se puede solicitar permiso para días anteriores.");
     }
     await this.validateNoActiveRequestForDate(user.userId, normalizedDate);
+    const rule = resolvePermissionRule(input.legalPermissionType);
     const payload: CreatePermissionRequestInput = {
       id: `prm-${crypto.randomUUID()}`,
       userId: user.userId,
       departmentId: user.departmentId,
       permissionDate: normalizedDate,
       permissionType: "FULL_DAY",
+      legalPermissionType: input.legalPermissionType ?? null,
+      attachmentUrl: input.attachmentUrl?.trim() || null,
+      requestedUnits: rule?.units ?? null,
+      requestedUnitType: rule?.unitType ?? null,
       reason,
       status: "PENDING_COORDINATOR",
       approverId: null,

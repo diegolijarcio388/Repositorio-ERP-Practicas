@@ -37,13 +37,13 @@ export function Modal({
 
   return (
     <div
-      className={`fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-3 transition-opacity duration-200 ${isVisible ? "opacity-100" : "opacity-0"}`}
+      className={`fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-slate-900/40 p-2 pt-4 transition-opacity duration-200 sm:items-center sm:p-4 ${isVisible ? "opacity-100" : "opacity-0"}`}
     >
       <div
-        className={`flex max-h-[90vh] w-full flex-col rounded-xl border border-slate-200 bg-white p-4 shadow-lg transition-all duration-200 ease-out ${isVisible ? "translate-y-0 scale-100 opacity-100" : "translate-y-2 scale-[0.98] opacity-0"} ${panelClassName ?? "max-w-lg"}`}
+        className={`flex max-h-[calc(100dvh-2rem)] w-full flex-col rounded-2xl border border-slate-200 bg-white p-3 shadow-xl transition-all duration-200 ease-out sm:max-h-[90vh] sm:p-5 ${isVisible ? "translate-y-0 scale-100 opacity-100" : "translate-y-2 scale-[0.98] opacity-0"} ${panelClassName ?? "max-w-lg"}`}
       >
-        <div className="relative mb-4 pt-6">
-          <h3 className="px-10 text-center text-xl font-semibold">{title}</h3>
+        <div className="relative mb-3 pt-7 sm:mb-4 sm:pt-6">
+          <h3 className="px-10 text-center text-lg font-semibold text-slate-900 sm:text-xl">{title}</h3>
           <Button
             variant="ghost"
             onClick={onClose}
@@ -63,7 +63,7 @@ export function Modal({
             </svg>
           </Button>
         </div>
-        <div className={`min-h-0 overflow-y-auto ${bodyClassName ?? ""}`}>{children}</div>
+        <div className={`min-h-0 overflow-y-auto overscroll-contain ${bodyClassName ?? ""}`}>{children}</div>
       </div>
     </div>
   );

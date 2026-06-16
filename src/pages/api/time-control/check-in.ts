@@ -42,6 +42,8 @@ export const POST: APIRoute = withApiError(async (context) => {
     typeof body?.deviceType === "string" ? body.deviceType : undefined;
   const deviceReason =
     typeof body?.deviceReason === "string" ? body.deviceReason : undefined;
+  const tabletCode =
+    typeof body?.tabletCode === "string" ? body.tabletCode : undefined;
 
   if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
     throw new Error("La ubicación es obligatoria para fichar la entrada.");
@@ -54,6 +56,7 @@ export const POST: APIRoute = withApiError(async (context) => {
     ipAddress: getClientIpAddress(context.request),
     userAgent: getUserAgent(context.request),
     deviceReason,
+    tabletCode,
   });
   return jsonOk({ item });
 });

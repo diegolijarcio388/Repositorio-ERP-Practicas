@@ -359,14 +359,14 @@ export function WorkerProjectsWorkspace({ session }: Props) {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div>
+      <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold">Mis proyectos e imputacion de horas</h2>
           <p className="mt-0.5 text-sm text-slate-500">
             Registra tus horas y revisa el estado de cada solicitud sin salir de esta pantalla.
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-1 gap-2 min-[420px]:grid-cols-2 sm:flex sm:shrink-0">
           <Button onClick={openNewInternalEntry}>+ Actividad interna</Button>
           <Button onClick={() => openNewProjectEntry(selectedProject?.id)}>+ Horas proyecto</Button>
         </div>
@@ -647,13 +647,13 @@ export function WorkerProjectsWorkspace({ session }: Props) {
       )}
 
       <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-3">
+        <div className="flex flex-col gap-3 border-b border-slate-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
           <h3 className="font-medium">Mis imputaciones</h3>
           <input
             type="month"
             value={filterDate}
             onChange={(event) => setFilterDate(event.target.value)}
-            className="rounded border border-slate-300 px-2 py-1 text-sm"
+            className="w-full rounded border border-slate-300 px-2 py-1 text-sm sm:w-auto"
           />
         </div>
 

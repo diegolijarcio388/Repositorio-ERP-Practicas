@@ -184,13 +184,13 @@ export function AdminCalendarWorkspace() {
       </header>
 
       <section className="space-y-3 rounded-xl border border-slate-200 bg-white p-4">
-        <div className="flex items-center justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="text-lg font-semibold">Dias reservados por departamento</h2>
-          <div className="flex items-center gap-2">
+          <div className="flex w-full items-center justify-between gap-2 rounded-xl border border-slate-100 bg-slate-50 p-1 sm:w-auto sm:justify-end sm:border-0 sm:bg-transparent sm:p-0">
             <Button variant="ghost" type="button" onClick={() => moveMonth(-1)}>
               {"<"}
             </Button>
-            <span className="min-w-44 text-center text-sm font-medium text-slate-700">
+            <span className="min-w-0 flex-1 truncate text-center text-sm font-medium text-slate-700 sm:min-w-44 sm:flex-none">
               {monthLabels[monthStart.getUTCMonth()]} {monthStart.getUTCFullYear()}
             </span>
             <Button variant="ghost" type="button" onClick={() => moveMonth(1)}>

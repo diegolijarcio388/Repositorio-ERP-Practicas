@@ -34,6 +34,7 @@ export interface UserDirectoryRecord {
   role: VacationRole;
   canManageTimeControlRequests: boolean;
   timeControlDevicePolicy: TimeControlDevicePolicy;
+  timeControlTabletCode: string | null;
   timeControlShiftId: string | null;
   canManageVacations: boolean;
   canManageProjects: boolean;
@@ -125,6 +126,7 @@ export interface AuthenticatedApiUser {
   coordinatorDepartmentIds: string[];
   canManageTimeControlRequests: boolean;
   timeControlDevicePolicy: TimeControlDevicePolicy;
+  timeControlTabletCode: string | null;
   timeControlShiftId: string | null;
   canManageVacations: boolean;
   canManageProjects: boolean;

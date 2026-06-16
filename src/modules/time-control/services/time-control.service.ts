@@ -307,6 +307,7 @@ export interface FichajeLocationInput {
   ipAddress?: string | null;
   userAgent?: string | null;
   deviceReason?: string | null;
+  tabletCode?: string | null;
 }
 
 const buildLocationIncidentFlags = (
@@ -385,6 +386,25 @@ const normalizeDeviceType = (value?: string | null): WorkdayDeviceType => {
   }
 };
 
+const validateTabletClockCode = (
+  user: AuthenticatedApiUser,
+  deviceType: WorkdayDeviceType,
+  providedCode?: string | null,
+): void => {
+  if (deviceType !== "TABLET") {
+    return;
+  }
+
+  const expectedCode = user.timeControlTabletCode?.trim();
+  if (!expectedCode) {
+    return;
+  }
+
+  if ((providedCode ?? "").trim() !== expectedCode) {
+    throw new Error("El código de tablet no es correcto.");
+  }
+};
+
 const isDeviceAllowedForPolicy = (
   deviceType: WorkdayDeviceType,
   policy: AuthenticatedApiUser["timeControlDevicePolicy"],
@@ -417,15 +437,7 @@ const normalizeDeviceReason = (
 ): string | null => {
   const normalized = value?.trim() ?? "";
 
-  if (deviceType !== "MOBILE") {
-    return normalized || null;
-  }
-
-  if (!normalized) {
-    throw new Error("Debes indicar un motivo cuando fichas desde móvil.");
-  }
-
-  return normalized;
+  return normalized || null;
 };
 
 const normalizeUserAgent = (value?: string | null): string | null => {
@@ -621,6 +633,7 @@ export class TimeControlService implements WorkdayRecordsService {
     const nowDateTime = toSqlDateTime(now);
     const workDate = toSqlDate(now);
     const normalizedDeviceType = normalizeDeviceType(location.deviceType);
+    validateTabletClockCode(user, normalizedDeviceType, location.tabletCode);
     const normalizedDeviceReason = normalizeDeviceReason(
       normalizedDeviceType,
       location.deviceReason,
@@ -703,6 +716,7 @@ export class TimeControlService implements WorkdayRecordsService {
     const now = new Date();
     const checkOutAt = toSqlDateTime(now);
     const normalizedDeviceType = normalizeDeviceType(location.deviceType);
+    validateTabletClockCode(user, normalizedDeviceType, location.tabletCode);
     const normalizedDeviceReason = normalizeDeviceReason(
       normalizedDeviceType,
       location.deviceReason,

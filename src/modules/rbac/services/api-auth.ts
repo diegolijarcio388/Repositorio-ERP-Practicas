@@ -41,6 +41,7 @@ export const requireApiUser = async (
     coordinatorDepartmentIds: coordinatedDepartments.map((department) => department.id),
     canManageTimeControlRequests: user.canManageTimeControlRequests,
     timeControlDevicePolicy: user.timeControlDevicePolicy,
+    timeControlTabletCode: user.timeControlTabletCode,
     timeControlShiftId: user.timeControlShiftId,
     canManageVacations: user.canManageVacations,
     canManageProjects: user.canManageProjects,

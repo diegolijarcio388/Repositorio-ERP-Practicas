@@ -200,15 +200,22 @@ export function DayMultiSelect({
     </div>
   );
 
+  const calendarHeaderLabel =
+    monthsToShow === 1
+      ? `${monthLabels[leftMonth.getUTCMonth()].toLowerCase()} ${leftMonth.getUTCFullYear()}`
+      : `${monthLabels[leftMonth.getUTCMonth()].toLowerCase()} - ${monthLabels[rightMonth.getUTCMonth()].toLowerCase()} ${rightMonth.getUTCFullYear()}`;
+
   return (
     <div
       className={`space-y-6 rounded-xl border border-slate-200 bg-slate-50 ${compact ? "p-3" : "p-6"}`}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <Button variant="ghost" onClick={() => moveMonth(-1)} type="button" className="px-2">
           {"<"}
         </Button>
-        <div className="text-sm text-slate-600">{cursorYear}</div>
+        <div className="min-w-0 flex-1 truncate text-center text-sm font-medium text-slate-700">
+          {calendarHeaderLabel}
+        </div>
         <Button variant="ghost" onClick={() => moveMonth(1)} type="button" className="px-2">
           {">"}
         </Button>

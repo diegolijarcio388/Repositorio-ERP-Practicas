@@ -15,6 +15,7 @@ interface DbUserRow {
   role: VacationRole;
   can_manage_time_control_requests: 0 | 1;
   time_control_device_policy: TimeControlDevicePolicy;
+  time_control_tablet_code: string | null;
   time_control_shift_id: string | null;
   can_manage_vacations: 0 | 1;
   can_manage_projects: 0 | 1;
@@ -29,13 +30,14 @@ const mapUserRow = (row: DbUserRow): UserDirectoryRecord => ({
   role: row.role,
   canManageTimeControlRequests: Boolean(row.can_manage_time_control_requests),
   timeControlDevicePolicy: row.time_control_device_policy,
+  timeControlTabletCode: row.time_control_tablet_code,
   timeControlShiftId: row.time_control_shift_id,
   canManageVacations: Boolean(row.can_manage_vacations),
   canManageProjects: Boolean(row.can_manage_projects),
 });
 
 const USER_SELECT =
-  "SELECT id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, time_control_shift_id, can_manage_vacations, can_manage_projects FROM users";
+  "SELECT id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, time_control_tablet_code, time_control_shift_id, can_manage_vacations, can_manage_projects FROM users";
 
 const isRecoverableDirectoryReadError = (error: unknown): boolean => {
   const errorRecord =
@@ -93,6 +95,23 @@ export class DirectoryRepository {
     } catch (error) {
       if (isRecoverableDirectoryReadError(error)) {
         logDirectoryReadError("findUserByEmail", error);
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  async findUserByTabletCode(code: string): Promise<UserDirectoryRecord | null> {
+    try {
+      const [rows] = await getMySqlPool().query<DbUserRow[]>(
+        `${USER_SELECT} WHERE time_control_tablet_code = ? LIMIT 1`,
+        [code],
+      );
+      const row = rows[0];
+      return row ? mapUserRow(row) : null;
+    } catch (error) {
+      if (isRecoverableDirectoryReadError(error)) {
+        logDirectoryReadError("findUserByTabletCode", error);
         return null;
       }
       throw error;
@@ -196,13 +215,14 @@ export class DirectoryRepository {
     role: string;
     canManageTimeControlRequests?: boolean;
     timeControlDevicePolicy?: TimeControlDevicePolicy;
+    timeControlTabletCode?: string | null;
     timeControlShiftId?: string | null;
     canManageVacations?: boolean;
     canManageProjects?: boolean;
   }): Promise<UserDirectoryRecord> {
     const id = crypto.randomUUID();
     await getMySqlPool().query(
-      "INSERT INTO users (id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, time_control_shift_id, can_manage_vacations, can_manage_projects) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+      "INSERT INTO users (id, name, job_title, email, department_id, role, can_manage_time_control_requests, time_control_device_policy, time_control_tablet_code, time_control_shift_id, can_manage_vacations, can_manage_projects) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
       [
         id,
         input.name.trim(),
@@ -212,6 +232,7 @@ export class DirectoryRepository {
         input.role,
         input.canManageTimeControlRequests ? 1 : 0,
         input.timeControlDevicePolicy ?? "TABLET_ONLY",
+        input.timeControlTabletCode?.trim() || null,
         input.timeControlShiftId ?? null,
         input.canManageVacations ? 1 : 0,
         input.canManageProjects ? 1 : 0,
@@ -234,6 +255,7 @@ export class DirectoryRepository {
       role?: string;
       canManageTimeControlRequests?: boolean;
       timeControlDevicePolicy?: TimeControlDevicePolicy;
+      timeControlTabletCode?: string | null;
       timeControlShiftId?: string | null;
       canManageVacations?: boolean;
       canManageProjects?: boolean;
@@ -268,6 +290,10 @@ export class DirectoryRepository {
     if (input.timeControlDevicePolicy !== undefined) {
       fields.push("time_control_device_policy = ?");
       values.push(input.timeControlDevicePolicy);
+    }
+    if ("timeControlTabletCode" in input) {
+      fields.push("time_control_tablet_code = ?");
+      values.push(input.timeControlTabletCode?.trim() || null);
     }
     if ("timeControlShiftId" in input) {
       fields.push("time_control_shift_id = ?");

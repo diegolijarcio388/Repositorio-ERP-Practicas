@@ -1,6 +1,7 @@
 ---
 import "../styles/global.css";
 import { TopbarControls } from "../shared/ui/TopbarControls";
+import { GlobalOpenWorkdayWarning } from "../modules/time-control/ui/GlobalOpenWorkdayWarning";
 import type { UserSession } from "../core/types";
 import { createDirectoryRepository } from "../modules/vacations/repositories/directory.repository";
 
@@ -159,6 +160,14 @@ const coordinatorSections = coordinatorDepartments.map((department) => ({
   // 1. Pasamos el nombre a mayúsculas para que tenga el mismo peso visual que "ADMINISTRACIÓN" o "TEMPLA"
   title: department.name.toUpperCase(),
   items: [
+    ...(canAccessTimeControlManagement
+      ? [
+          {
+            label: "Control de Trabajadores",
+            href: "/control-horario/gestion",
+          },
+        ]
+      : []),
     {
       // Este ya clava el estilo "Vacaciones de Administración" que le gusta a tu tutor, pero por departamento
       label: `Vacaciones de ${department.name}`,
@@ -177,7 +186,13 @@ const coordinatorSections = coordinatorDepartments.map((department) => ({
 }));
 
 const showTimeControlSection = timeControlSectionItems.length > 0;
-const coordinatorNavSections = coordinatorSections;
+const coordinatorNavSections = coordinatorSections.map((section) => ({
+  ...section,
+  items: section.items.filter(
+    (item, index, items) =>
+      items.findIndex((candidate) => candidate.href === item.href) === index,
+  ),
+}));
 
 /* const timeControlSection = {
   title: "Control Horario",
@@ -216,20 +231,20 @@ const coordinatorNavSections = coordinatorSections;
       <div class="min-h-screen flex flex-col md:flex-row">
         <aside 
           id="sidebar"
-          class="fixed inset-y-0 left-0 z-50 w-[86vw] max-w-72 shrink-0 bg-white border-r border-slate-200 transform -translate-x-full transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:w-72 md:translate-x-0 md:inset-auto"
+          class="fixed inset-y-0 left-0 z-50 w-[86vw] max-w-72 shrink-0 bg-white border-r border-slate-200 transform -translate-x-full transition-transform duration-300 ease-in-out md:sticky md:top-0 md:h-screen md:max-h-screen md:w-72 md:translate-x-0 md:inset-auto"
         >
-          <div class="flex flex-col h-full">
-            <div class="p-5 border-b border-slate-100 flex items-center justify-between gap-2">
+          <div class="relative flex h-full flex-col">
+            <div class="flex h-[69px] items-center border-b border-slate-100 px-5">
               <a href="/dashboard" class="flex items-center gap-2 min-w-0">
                 <div class="w-8 h-8 bg-slate-900 rounded-lg flex items-center justify-center shrink-0">
                   <span class="text-white font-bold text-lg">C</span>
                 </div>
-                <span class="font-bold text-slate-900 tracking-tight truncate">cetemet-control</span>
+                <span class="sidebar-logo-text font-bold text-slate-900 tracking-tight truncate">cetemet-control</span>
               </a>
               
               <button 
                 id="close-sidebar" 
-                class="group p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-50 border border-slate-100 rounded-lg transition-all active:scale-95 shadow-sm shrink-0 flex items-center justify-center"
+                class="group absolute -right-4 top-1/2 z-20 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-400 shadow-md shadow-slate-200/70 transition-all hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700 active:scale-95"
                 aria-label="Ocultar menú lateral"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="transition-transform duration-300 group-hover:-translate-x-0.5">
@@ -240,7 +255,7 @@ const coordinatorNavSections = coordinatorSections;
               </button>
             </div>
 
-            <div class="flex-1 overflow-y-auto py-4 px-3 custom-scrollbar">
+            <div class="sidebar-expanded-only flex-1 overflow-y-auto py-4 px-3 custom-scrollbar">
               {session?.role === "Admin" ? (
                 visibleAdminSidebarSections.map((section, index) => (
                   <nav class:list={["space-y-1", index > 0 && "mt-6"]}>
@@ -303,7 +318,7 @@ const coordinatorNavSections = coordinatorSections;
               )}
             </div>
 
-            <div class="p-4 border-t border-slate-100 bg-slate-50/50">
+            <div class="sidebar-expanded-only p-4 border-t border-slate-100 bg-slate-50/50">
                <div class="flex items-center gap-3 px-2">
                  <div class="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center text-slate-600 font-bold border-2 border-white shadow-sm">
                    {formatMenuUserName(session).charAt(0)}
@@ -381,6 +396,7 @@ const coordinatorNavSections = coordinatorSections;
           <main class="flex-1 px-3 py-4 sm:p-4 md:p-6 xl:p-8">
             <slot />
           </main>
+          <GlobalOpenWorkdayWarning client:load session={session} />
         </div>
       </div>
     )}
@@ -396,9 +412,17 @@ const coordinatorNavSections = coordinatorSections;
         return window.innerWidth >= 768;
       }
 
+      function shouldCloseSidebarForModal() {
+        return window.innerWidth < 1024;
+      }
+
       // NUEVO: Función para sincronizar la visibilidad del botón de abrir (Header)
       function syncToggleBtn() {
         if (!toggleBtn) return;
+        if (isDesktopSidebar()) {
+          toggleBtn.style.display = "none";
+          return;
+        }
         let isHidden = false;
         
         // Comprobamos si el menú está oculto dependiendo de si estamos en PC o Móvil
@@ -434,6 +458,11 @@ const coordinatorNavSections = coordinatorSections;
         if (!sidebar || !backdrop) return;
 
         if (isDesktopSidebar()) {
+          if (shouldCloseSidebarForModal() && hasOpenModal()) {
+            setDesktopSidebarHidden(true);
+            return;
+          }
+
           setDesktopSidebarHidden(
             !document.body.classList.contains("sidebar-desktop-hidden"),
           );
@@ -455,9 +484,86 @@ const coordinatorNavSections = coordinatorSections;
         syncToggleBtn();
       }
 
+      function closeMobileSidebar() {
+        if (!sidebar || !backdrop || isDesktopSidebar()) return;
+        if (sidebar.classList.contains("-translate-x-full")) return;
+
+        sidebar.classList.add("-translate-x-full");
+        backdrop.classList.add("hidden");
+        document.body.classList.remove("overflow-hidden");
+        syncToggleBtn();
+      }
+
+      function looksLikeModal(node: Node) {
+        if (!(node instanceof HTMLElement)) return false;
+        if (node.id === "sidebar" || node.id === "sidebar-backdrop") return false;
+
+        const classes = node.className.toString();
+        return (
+          node.getAttribute("role") === "dialog" ||
+          node.getAttribute("aria-modal") === "true" ||
+          (classes.includes("fixed") && classes.includes("inset-0") && !classes.includes("hidden"))
+        );
+      }
+
+      function nodeContainsModal(node: Node) {
+        if (!(node instanceof HTMLElement)) return false;
+        if (looksLikeModal(node)) return true;
+
+        return Array.from(node.querySelectorAll("*")).some((child) =>
+          looksLikeModal(child),
+        );
+      }
+
+      function hasOpenModal() {
+        return Array.from(document.body.querySelectorAll("*")).some((node) =>
+          looksLikeModal(node),
+        );
+      }
+
+      function syncModalSidebarState() {
+        const shouldUseModalLayout = shouldCloseSidebarForModal() && hasOpenModal();
+        document.body.classList.toggle("sidebar-modal-open", shouldUseModalLayout);
+
+        if (!shouldUseModalLayout || !sidebar) return;
+
+        if (isDesktopSidebar()) {
+          setDesktopSidebarHidden(true);
+        } else {
+          closeMobileSidebar();
+        }
+      }
+
       toggleBtn?.addEventListener("click", toggleSidebar);
       closeBtn?.addEventListener("click", toggleSidebar);
       backdrop?.addEventListener("click", toggleSidebar);
+
+      const closeSidebarWhenModalOpens = new MutationObserver((mutations) => {
+        syncModalSidebarState();
+
+        if (!sidebar || !shouldCloseSidebarForModal()) {
+          return;
+        }
+
+        if (
+          mutations.some((mutation) =>
+            Array.from(mutation.addedNodes).some((node) => nodeContainsModal(node)),
+          )
+        ) {
+          if (isDesktopSidebar()) {
+            setDesktopSidebarHidden(true);
+          } else {
+            closeMobileSidebar();
+          }
+        }
+      });
+
+      closeSidebarWhenModalOpens.observe(document.body, {
+        childList: true,
+        subtree: true,
+      });
+
+      syncModalSidebarState();
 
       try {
         if (window.localStorage.getItem(desktopSidebarStorageKey) === "1") {
@@ -481,6 +587,7 @@ const coordinatorNavSections = coordinatorSections;
           document.body.classList.remove("sidebar-desktop-hidden");
         }
         // NUEVO: Sincronizar botón si el usuario cambia el tamaño de la ventana
+        syncModalSidebarState();
         syncToggleBtn();
       });
 </script>
@@ -511,6 +618,30 @@ const coordinatorNavSections = coordinatorSections;
 
       @media (min-width: 768px) {
         body.sidebar-desktop-hidden #sidebar {
+          display: block;
+          width: 4.5rem;
+          max-width: 4.5rem;
+          transform: none;
+          overflow: visible;
+        }
+
+        body.sidebar-desktop-hidden #sidebar .sidebar-logo-text,
+        body.sidebar-desktop-hidden #sidebar .sidebar-expanded-only {
+          display: none;
+        }
+
+        body.sidebar-desktop-hidden #sidebar a[href="/dashboard"] {
+          justify-content: center;
+        }
+
+        body.sidebar-desktop-hidden #sidebar #close-sidebar svg {
+          transform: rotate(180deg);
+        }
+      }
+
+      @media (max-width: 1023px) {
+        body.sidebar-modal-open #sidebar,
+        body.sidebar-modal-open .global-open-workday-banner {
           display: none;
         }
       }

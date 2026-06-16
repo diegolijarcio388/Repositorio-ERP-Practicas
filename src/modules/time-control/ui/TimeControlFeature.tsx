@@ -58,7 +58,7 @@ const ADJUSTMENT_STATUS_LABELS: Record<AdjustmentRequestStatus, string> = {
 };
 
 const ADJUSTMENT_STATUS_CLASSES: Record<AdjustmentRequestStatus, string> = {
-  PENDING_COORDINATOR: "border border-amber-500 bg-transparent text-amber-700",
+  PENDING_COORDINATOR: "border border-orange-500 bg-transparent text-orange-700",
   PENDING_ADMIN: "border border-orange-500 bg-transparent text-orange-700",
   APPROVED: "border border-emerald-500 bg-transparent text-emerald-700",
   REJECTED: "border border-rose-500 bg-transparent text-rose-700",
@@ -485,13 +485,14 @@ const POPUP_DANGER_BUTTON_CLASS =
   "flex items-center justify-center gap-2 rounded-xl bg-rose-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-rose-700";
 
 const DETAIL_ACTION_BUTTON_CLASS =
-  "group inline-flex h-8 items-center justify-center gap-1.5 rounded-xl border border-orange-200 bg-orange-50/40 px-3.5 text-xs font-semibold text-orange-700 shadow-sm transition-all duration-300 hover:border-orange-300 hover:bg-orange-50 hover:text-orange-800 hover:shadow active:scale-95";
+  "group inline-flex items-center justify-center gap-2 rounded-full border border-sky-300 bg-white px-4 py-2 text-sm font-semibold text-sky-700 shadow-sm transition-all duration-300 hover:border-sky-400 hover:bg-sky-50 hover:text-sky-800 active:scale-95";
 
 const DETAIL_ACTION_ICON_CLASS =
-  "ti ti-external-link text-[14px] text-orange-500 transition-transform duration-300 group-hover:-translate-y-0.5 group-hover:text-orange-600";
+  "ti ti-external-link text-sm text-sky-600 transition-transform duration-300 group-hover:scale-110 group-hover:-translate-y-0.5 group-hover:text-sky-700";
 
 const OPEN_WORKDAY_WARNING_MINUTES = 8 * 60 + 15;
 const OPEN_WORKDAY_CRITICAL_MINUTES = 24 * 60;
+const LIVE_REFRESH_INTERVAL_MS = 10_000;
 
 const DEVICE_TYPE_LABELS: Record<WorkdayDeviceType, string> = {
   MOBILE: "MÓVIL",
@@ -501,7 +502,7 @@ const DEVICE_TYPE_LABELS: Record<WorkdayDeviceType, string> = {
 };
 
 const getDeviceTypeLabel = (deviceType: WorkdayDeviceType | null): string =>
-  deviceType ? DEVICE_TYPE_LABELS[deviceType] : "Dispositivo";
+  deviceType ? DEVICE_TYPE_LABELS[deviceType] : "Desconocido";
 
 const getDisplayTrustLevel = (
   record: WorkdayRecord,
@@ -577,7 +578,36 @@ interface CalendarDayCell {
 interface GeolocationCoordinatesPayload {
   latitude: number;
   longitude: number;
+  deviceType: WorkdayDeviceType;
 }
+
+const detectCurrentWorkdayDeviceType = (): WorkdayDeviceType => {
+  if (typeof navigator === "undefined" || typeof window === "undefined") {
+    return "UNKNOWN";
+  }
+
+  const userAgent = navigator.userAgent.toLowerCase();
+  const hasTouch = navigator.maxTouchPoints > 0;
+  const shorterSide = Math.min(window.screen.width, window.screen.height);
+
+  if (
+    userAgent.includes("ipad") ||
+    userAgent.includes("tablet") ||
+    (hasTouch && shorterSide >= 600)
+  ) {
+    return "TABLET";
+  }
+
+  if (
+    userAgent.includes("mobi") ||
+    userAgent.includes("iphone") ||
+    userAgent.includes("android")
+  ) {
+    return "MOBILE";
+  }
+
+  return "DESKTOP";
+};
 
 interface ManagerTodayExclusionsState {
   vacations: Array<{ id: string; name: string }>;
@@ -587,8 +617,24 @@ interface ManagerTodayExclusionsState {
 
 type WorkerRequestsTab = "incidents" | "requests";
 type ManagerReviewTab = "requests" | "incidents" | "exclusions" | "records" | "tracker";
+type TabletClockAction = {
+  endpoint: "/api/time-control/check-in" | "/api/time-control/check-out";
+  successMessage: string;
+};
 
 type ExclusionRequestType = "REMOTE_WORK" | "PERMISSION";
+type LegalPermissionType =
+  | "MEDICAL"
+  | "MARRIAGE"
+  | "DEATH_SPOUSE_PARENT_CHILD"
+  | "HOSPITALIZATION_OR_SECOND_DEGREE"
+  | "MOVING"
+  | "PUBLIC_DUTY"
+  | "EXAM";
+type PermissionRequestedUnitType =
+  | "NATURAL_DAYS"
+  | "WORKING_DAYS"
+  | "INDISPENSABLE_TIME";
 type ExclusionRequestStatus =
   | "PENDING_COORDINATOR"
   | "PENDING_ADMIN"
@@ -611,6 +657,10 @@ interface PermissionRequestItem {
   userName?: string | null;
   permissionDate: string;
   reason: string;
+  legalPermissionType?: LegalPermissionType | null;
+  attachmentUrl?: string | null;
+  requestedUnits?: number | null;
+  requestedUnitType?: PermissionRequestedUnitType | null;
   status: ExclusionRequestStatus;
   approverComment: string | null;
 }
@@ -624,11 +674,12 @@ interface UnifiedExclusionRequestItem {
   reason: string;
   status: ExclusionRequestStatus;
   approverComment: string | null;
+  legalPermissionType?: LegalPermissionType | null;
 }
 
 const EXCLUSION_REQUEST_STATUS_LABELS: Record<ExclusionRequestStatus, string> =
   {
-    PENDING_COORDINATOR: "Pendiente coordinador",
+    PENDING_COORDINATOR: "Pendiente administración",
     PENDING_ADMIN: "Pendiente administración",
     APPROVED: "Aprobada",
     REJECTED: "Rechazada",
@@ -637,11 +688,53 @@ const EXCLUSION_REQUEST_STATUS_LABELS: Record<ExclusionRequestStatus, string> =
 const EXCLUSION_REQUEST_STATUS_CLASSES: Record<ExclusionRequestStatus, string> =
   {
     PENDING_COORDINATOR:
-      "border border-amber-500 bg-transparent text-amber-700",
+      "border border-orange-500 bg-transparent text-orange-700",
     PENDING_ADMIN: "border border-orange-500 bg-transparent text-orange-700",
     APPROVED: "border border-emerald-500 bg-transparent text-emerald-700",
     REJECTED: "border border-rose-500 bg-transparent text-rose-700",
   };
+
+const LEGAL_PERMISSION_TYPE_OPTIONS: Array<{
+  value: LegalPermissionType;
+  label: string;
+  rule: string;
+}> = [
+  {
+    value: "MEDICAL",
+    label: "Permiso médico",
+    rule: "Tiempo indispensable, siempre que sea por Seguridad Social.",
+  },
+  {
+    value: "MARRIAGE",
+    label: "Matrimonio o pareja de hecho",
+    rule: "15 días naturales.",
+  },
+  {
+    value: "DEATH_SPOUSE_PARENT_CHILD",
+    label: "Fallecimiento de cónyuge, padres o hijos",
+    rule: "4 días laborables.",
+  },
+  {
+    value: "HOSPITALIZATION_OR_SECOND_DEGREE",
+    label: "Hospitalización, enfermedad grave o familiar hasta 2.º grado",
+    rule: "2 días laborables, o 4 si hay desplazamiento superior a 200 km.",
+  },
+  {
+    value: "MOVING",
+    label: "Traslado de domicilio",
+    rule: "1 día laborable.",
+  },
+  {
+    value: "PUBLIC_DUTY",
+    label: "Deber público inexcusable",
+    rule: "Tiempo indispensable: citaciones oficiales, comparecencia judicial, DNI o pasaporte si no puede hacerse fuera de jornada.",
+  },
+  {
+    value: "EXAM",
+    label: "Exámenes",
+    rule: "Tiempo indispensable.",
+  },
+];
 
 const normalizeDateTimeLocalToSql = (value: string): string => {
   if (!value) return "";
@@ -706,28 +799,24 @@ const getEndOfWeekSqlDate = (sqlDate: string): string => {
 const doesHourlySlotMatchRecord = (
   record: WorkdayRecord,
   hour: number,
+  slotDate: string,
 ): boolean => {
-  const recordStartMinutes = getMinutesFromSqlDateTime(record.checkInAt);
-  if (recordStartMinutes === null) {
+  const recordStartTime = new Date(record.checkInAt.replace(" ", "T")).getTime();
+  if (!Number.isFinite(recordStartTime)) {
     return false;
   }
 
-  let recordEndMinutes = getMinutesFromSqlDateTime(record.checkOutAt);
-  if (recordEndMinutes === null) {
-    if (record.status === "OPEN" && record.workDate === getTodaySqlDate()) {
-      const now = new Date();
-      recordEndMinutes = now.getHours() * 60 + now.getMinutes();
-    } else {
-      recordEndMinutes = recordStartMinutes + 1;
-    }
-  }
+  const recordEndTime = record.checkOutAt
+    ? new Date(record.checkOutAt.replace(" ", "T")).getTime()
+    : record.status === "OPEN"
+      ? Date.now()
+      : recordStartTime + 60_000;
+  const slotStartTime = new Date(
+    `${slotDate}T${String(hour).padStart(2, "0")}:00:00`,
+  ).getTime();
+  const slotEndTime = slotStartTime + 60 * 60_000;
 
-  const slotStartMinutes = hour * 60;
-  const slotEndMinutes = slotStartMinutes + 60;
-
-  return (
-    recordStartMinutes < slotEndMinutes && recordEndMinutes > slotStartMinutes
-  );
+  return recordStartTime < slotEndTime && recordEndTime > slotStartTime;
 };
 
 const getHourlySlotRecordPriority = (record: WorkdayRecord): number => {
@@ -747,9 +836,10 @@ const getHourlySlotRecordPriority = (record: WorkdayRecord): number => {
 const getHourlySlotRecord = (
   records: WorkdayRecord[],
   hour: number,
+  slotDate: string,
 ): WorkdayRecord | undefined =>
   records
-    .filter((record) => doesHourlySlotMatchRecord(record, hour))
+    .filter((record) => doesHourlySlotMatchRecord(record, hour, slotDate))
     .sort(
       (left, right) =>
         getHourlySlotRecordPriority(right) - getHourlySlotRecordPriority(left),
@@ -762,22 +852,41 @@ const getHourlySlotRecord = (
 const getSlotProportionalOffset = (
   record: WorkdayRecord,
   hour: number,
+  slotDate: string,
 ): { leftFraction: number; rightFraction: number } => {
-  const startMinutes = getMinutesFromSqlDateTime(record.checkInAt) ?? hour * 60;
-  let endMinutes = getMinutesFromSqlDateTime(record.checkOutAt);
-  if (endMinutes === null) {
-    if (record.status === "OPEN" && record.workDate === getTodaySqlDate()) {
-      const now = new Date();
-      endMinutes = now.getHours() * 60 + now.getMinutes();
-    } else {
-      endMinutes = startMinutes + 1;
-    }
-  }
-  const slotStart = hour * 60;
-  const slotEnd = slotStart + 60;
-  const leftFraction = Math.max(0, startMinutes - slotStart) / 60;
-  const rightFraction = Math.max(0, slotEnd - endMinutes) / 60;
+  const startTime = new Date(record.checkInAt.replace(" ", "T")).getTime();
+  const endTime = record.checkOutAt
+    ? new Date(record.checkOutAt.replace(" ", "T")).getTime()
+    : record.status === "OPEN"
+      ? Date.now()
+      : startTime + 60_000;
+  const slotStart = new Date(
+    `${slotDate}T${String(hour).padStart(2, "0")}:00:00`,
+  ).getTime();
+  const slotEnd = slotStart + 60 * 60_000;
+  const leftFraction = Math.max(0, startTime - slotStart) / (60 * 60_000);
+  const rightFraction = Math.max(0, slotEnd - endTime) / (60 * 60_000);
   return { leftFraction, rightFraction };
+};
+
+const doesRecordIntersectDay = (
+  record: WorkdayRecord,
+  sqlDate: string,
+): boolean => {
+  const startTime = new Date(record.checkInAt.replace(" ", "T")).getTime();
+  if (!Number.isFinite(startTime)) {
+    return false;
+  }
+
+  const endTime = record.checkOutAt
+    ? new Date(record.checkOutAt.replace(" ", "T")).getTime()
+    : record.status === "OPEN"
+      ? Date.now()
+      : startTime + 60_000;
+  const dayStart = new Date(`${sqlDate}T00:00:00`).getTime();
+  const dayEnd = dayStart + 24 * 60 * 60_000;
+
+  return startTime < dayEnd && endTime > dayStart;
 };
 
 const getQuadrantRecordColorClasses = (record: WorkdayRecord): string => {
@@ -899,7 +1008,23 @@ const getStatusDetailItems = (record: WorkdayRecord): string[] => {
     items.push(getStatusDetail(record).replace(/\.$/, ""));
   }
 
-  return Array.from(new Set(items));
+  const normalizedKeys = new Set<string>();
+  return items.filter((item) => {
+    const normalizedKey = item
+      .toLocaleLowerCase("es-ES")
+      .replace(/^fichaje (realizado )?desde /, "")
+      .replace(/^fichaje /, "")
+      .replace(/[.,]/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+
+    if (normalizedKeys.has(normalizedKey)) {
+      return false;
+    }
+
+    normalizedKeys.add(normalizedKey);
+    return true;
+  });
 };
 
 const getStatusDetailItemClass = (record: WorkdayRecord): string =>
@@ -989,6 +1114,7 @@ const getCurrentLocation = (): Promise<GeolocationCoordinatesPayload> =>
         resolve({
           latitude: position.coords.latitude,
           longitude: position.coords.longitude,
+          deviceType: detectCurrentWorkdayDeviceType(),
         });
       },
       () => {
@@ -1179,12 +1305,21 @@ const [filterValidationStatus, setFilterValidationStatus] = useState<string>("AL
   const [requestReason, setRequestReason] = useState("");
   const [showLocationHelp, setShowLocationHelp] = useState(false);
   const [showRequestModal, setShowRequestModal] = useState(false);
+  const [tabletClockAction, setTabletClockAction] =
+    useState<TabletClockAction | null>(null);
+  const [tabletClockCode, setTabletClockCode] = useState("");
+  const [tabletClockError, setTabletClockError] = useState<string | null>(null);
   const [showExclusionRequestModal, setShowExclusionRequestModal] =
     useState(false);
   const [exclusionRequestType, setExclusionRequestType] =
     useState<ExclusionRequestType>("REMOTE_WORK");
   const [exclusionRequestDate, setExclusionRequestDate] = useState("");
   const [exclusionRequestReason, setExclusionRequestReason] = useState("");
+  const [permissionLegalType, setPermissionLegalType] =
+    useState<LegalPermissionType>("MEDICAL");
+  const [permissionAttachmentFiles, setPermissionAttachmentFiles] = useState<
+    File[]
+  >([]);
   const [exclusionRequestSubmitting, setExclusionRequestSubmitting] =
     useState(false);
   const [workerRequestsTab, setWorkerRequestsTab] =
@@ -1976,7 +2111,7 @@ const filteredRecords = useMemo(() => {
       new Set(
         records
           // Filtramos por la fecha seleccionada en el resumen diario
-          .filter((record) => record.workDate === trackerDate)
+          .filter((record) => doesRecordIntersectDay(record, trackerDate))
           .map((record) => record.userId),
       ),
     [records, trackerDate],
@@ -1985,7 +2120,7 @@ const filteredRecords = useMemo(() => {
   const trackerDateRecordsMap = useMemo(() => {
     const map = new Map<string, WorkdayRecord[]>();
     filteredRecords
-      .filter((r) => r.workDate === trackerDate)
+      .filter((r) => doesRecordIntersectDay(r, trackerDate))
       .forEach((r) => {
         const userRecords = map.get(r.userId) || [];
         userRecords.push(r);
@@ -2154,6 +2289,7 @@ const filteredRecords = useMemo(() => {
           reason: entry.reason,
           status: entry.status,
           approverComment: entry.approverComment,
+          legalPermissionType: entry.legalPermissionType ?? null,
         })),
       ].sort((left, right) =>
         right.requestDate.localeCompare(left.requestDate),
@@ -2185,6 +2321,7 @@ const filteredRecords = useMemo(() => {
           reason: entry.reason,
           status: entry.status,
           approverComment: entry.approverComment,
+          legalPermissionType: entry.legalPermissionType ?? null,
         })),
       ].sort((left, right) =>
         right.requestDate.localeCompare(left.requestDate),
@@ -2389,7 +2526,10 @@ const filteredRecords = useMemo(() => {
     managerReviewTab,
   ]);
 
-  const loadRecords = async (signal?: AbortSignal) => {
+  const loadRecords = async (
+    signal?: AbortSignal,
+    options: { silent?: boolean } = {},
+  ) => {
     if (loadRecordsPromiseRef.current) {
       if (!signal) {
         loadRecordsQueuedRef.current = true;
@@ -2398,9 +2538,11 @@ const filteredRecords = useMemo(() => {
     }
 
     const loadTask = (async () => {
-      setLoading(true);
+      if (!options.silent) {
+        setLoading(true);
+      }
       try {
-        const response = await fetch(endpointBase, { signal });
+        const response = await fetch(endpointBase, { cache: "no-store", signal });
         const data = (await response.json()) as {
           items?: WorkdayRecord[];
           error?: string;
@@ -2455,7 +2597,9 @@ const filteredRecords = useMemo(() => {
           message: errorMessage,
         });
       } finally {
-        setLoading(false);
+        if (!options.silent) {
+          setLoading(false);
+        }
       }
     })();
 
@@ -2468,15 +2612,19 @@ const filteredRecords = useMemo(() => {
 
       if (loadRecordsQueuedRef.current && !signal?.aborted) {
         loadRecordsQueuedRef.current = false;
-        void loadRecords();
+        void loadRecords(undefined, options);
       }
     }
   };
 
-  const loadRequests = async () => {
-    setRequestsLoading(true);
+  const loadRequests = async (silent = false) => {
+    if (!silent) {
+      setRequestsLoading(true);
+    }
     try {
-      const response = await fetch("/api/time-control/adjustments/me");
+      const response = await fetch("/api/time-control/adjustments/me", {
+        cache: "no-store",
+      });
       const data = (await response.json()) as {
         items?: WorkdayAdjustmentRequest[];
         error?: string;
@@ -2496,7 +2644,9 @@ const filteredRecords = useMemo(() => {
             : "No se pudieron cargar las solicitudes.",
       });
     } finally {
-      setRequestsLoading(false);
+      if (!silent) {
+        setRequestsLoading(false);
+      }
     }
   };
 
@@ -2516,7 +2666,9 @@ const filteredRecords = useMemo(() => {
         dateTo,
         includeOpen: "1",
       });
-      const response = await fetch(`/api/time-control/me?${params.toString()}`);
+      const response = await fetch(`/api/time-control/me?${params.toString()}`, {
+        cache: "no-store",
+      });
       const data = (await response.json()) as {
         items?: WorkdayRecord[];
         error?: string;
@@ -2535,17 +2687,20 @@ const filteredRecords = useMemo(() => {
     }
   };
 
-  const loadIncidentJustifications = async () => {
+  const loadIncidentJustifications = async (silent = false) => {
     if (!isWorkerMode) {
       setIncidentJustifications([]);
       setIncidentJustificationsLoading(false);
       return;
     }
 
-    setIncidentJustificationsLoading(true);
+    if (!silent) {
+      setIncidentJustificationsLoading(true);
+    }
     try {
       const response = await fetch(
         "/api/time-control/incident-justifications/me",
+        { cache: "no-store" },
       );
       const data = (await response.json()) as {
         items?: WorkdayIncidentJustification[];
@@ -2568,11 +2723,13 @@ const filteredRecords = useMemo(() => {
             : "No se pudieron cargar las justificaciones.",
       });
     } finally {
-      setIncidentJustificationsLoading(false);
+      if (!silent) {
+        setIncidentJustificationsLoading(false);
+      }
     }
   };
 
-  const loadMyExclusionRequests = async () => {
+  const loadMyExclusionRequests = async (silent = false) => {
     if (!isWorkerMode) {
       setMyRemoteWorkRequests([]);
       setMyPermissionRequests([]);
@@ -2580,11 +2737,13 @@ const filteredRecords = useMemo(() => {
       return;
     }
 
-    setMyExclusionRequestsLoading(true);
+    if (!silent) {
+      setMyExclusionRequestsLoading(true);
+    }
     try {
       const [remoteResponse, permissionResponse] = await Promise.all([
-        fetch("/api/remote-work/me"),
-        fetch("/api/permissions/me"),
+        fetch("/api/remote-work/me", { cache: "no-store" }),
+        fetch("/api/permissions/me", { cache: "no-store" }),
       ]);
 
       const remoteData = (await remoteResponse.json()) as {
@@ -2619,24 +2778,28 @@ const filteredRecords = useMemo(() => {
       setMyRemoteWorkRequests([]);
       setMyPermissionRequests([]);
     } finally {
-      setMyExclusionRequestsLoading(false);
+      if (!silent) {
+        setMyExclusionRequestsLoading(false);
+      }
     }
   };
 
-  const loadPendingRequests = async () => {
+  const loadPendingRequests = async (silent = false) => {
     if (!canAccessManagementPanel || !canReviewAdjustmentRequests) {
       setPendingRequests([]);
       setPendingRequestsLoading(false);
       return;
     }
 
-    setPendingRequestsLoading(true);
+    if (!silent) {
+      setPendingRequestsLoading(true);
+    }
     try {
       const endpoint = isFunctionalAdmin
         ? "/api/time-control/adjustments/admin"
         : "/api/time-control/adjustments/coordinator";
 
-      const response = await fetch(endpoint);
+      const response = await fetch(endpoint, { cache: "no-store" });
       const data = (await response.json()) as {
         items?: WorkdayAdjustmentRequest[];
         error?: string;
@@ -2658,23 +2821,27 @@ const filteredRecords = useMemo(() => {
             : "No se pudieron cargar las solicitudes pendientes.",
       });
     } finally {
-      setPendingRequestsLoading(false);
+      if (!silent) {
+        setPendingRequestsLoading(false);
+      }
     }
   };
 
-  const loadPendingIncidentJustifications = async () => {
+  const loadPendingIncidentJustifications = async (silent = false) => {
     if (!canAccessManagementPanel || !canReviewIncidentRequests) {
       setPendingIncidentJustifications([]);
       setPendingIncidentJustificationsLoading(false);
       return;
     }
 
-    setPendingIncidentJustificationsLoading(true);
+    if (!silent) {
+      setPendingIncidentJustificationsLoading(true);
+    }
     try {
       const endpoint = isFunctionalAdmin
         ? "/api/time-control/incident-justifications/admin"
         : "/api/time-control/incident-justifications/coordinator";
-      const response = await fetch(endpoint);
+      const response = await fetch(endpoint, { cache: "no-store" });
       const data = (await response.json()) as {
         items?: WorkdayIncidentJustification[];
         error?: string;
@@ -2696,11 +2863,13 @@ const filteredRecords = useMemo(() => {
             : "No se pudieron cargar las justificaciones pendientes.",
       });
     } finally {
-      setPendingIncidentJustificationsLoading(false);
+      if (!silent) {
+        setPendingIncidentJustificationsLoading(false);
+      }
     }
   };
 
-  const loadPendingExclusionRequests = async () => {
+  const loadPendingExclusionRequests = async (silent = false) => {
     if (!canAccessManagementPanel || !canReviewExclusionRequests) {
       setPendingRemoteWorkRequests([]);
       setPendingPermissionRequests([]);
@@ -2708,7 +2877,9 @@ const filteredRecords = useMemo(() => {
       return;
     }
 
-    setPendingExclusionRequestsLoading(true);
+    if (!silent) {
+      setPendingExclusionRequestsLoading(true);
+    }
     try {
       const remoteEndpoint = isFunctionalAdmin
         ? "/api/remote-work/admin-pending"
@@ -2718,8 +2889,8 @@ const filteredRecords = useMemo(() => {
         : "/api/permissions/coordinator";
 
       const [remoteResponse, permissionResponse] = await Promise.all([
-        fetch(remoteEndpoint),
-        fetch(permissionEndpoint),
+        fetch(remoteEndpoint, { cache: "no-store" }),
+        fetch(permissionEndpoint, { cache: "no-store" }),
       ]);
 
       const remoteData = (await remoteResponse.json()) as {
@@ -2754,7 +2925,9 @@ const filteredRecords = useMemo(() => {
       setPendingRemoteWorkRequests([]);
       setPendingPermissionRequests([]);
     } finally {
-      setPendingExclusionRequestsLoading(false);
+      if (!silent) {
+        setPendingExclusionRequestsLoading(false);
+      }
     }
   };
 
@@ -2795,6 +2968,7 @@ const filteredRecords = useMemo(() => {
     try {
       const response = await fetch(
         `/api/time-control/exclusions/today?date=${encodeURIComponent(trackerDate)}`,
+        { cache: "no-store" },
       );
       const data = (await response.json()) as {
         vacations?: Array<{ id: string; name: string }>;
@@ -2826,6 +3000,15 @@ const filteredRecords = useMemo(() => {
 
     return () => {
       controller.abort("cleanup");
+    };
+  }, [endpointBase]);
+
+  useEffect(() => {
+    const refreshRecords = () => void loadRecords(undefined, { silent: true });
+    window.addEventListener("time-control:records-updated", refreshRecords);
+
+    return () => {
+      window.removeEventListener("time-control:records-updated", refreshRecords);
     };
   }, [endpointBase]);
 
@@ -2887,18 +3070,24 @@ const filteredRecords = useMemo(() => {
     void loadGlobalWorkerRecords();
     void loadIncidentJustifications();
     void loadMyExclusionRequests();
-  }, [isWorkerMode]);
+  }, [isWorkerMode, endpointBase]);
 
   useEffect(() => {
     if (!isWorkerMode) return;
 
     const refreshWorkerNotices = () => {
-      void loadRequests();
+      void loadRecords(undefined, { silent: true });
+      void loadRequests(true);
       void loadGlobalWorkerRecords();
+      void loadIncidentJustifications(true);
+      void loadMyExclusionRequests(true);
     };
 
     window.addEventListener("focus", refreshWorkerNotices);
-    const intervalId = window.setInterval(refreshWorkerNotices, 60_000);
+    const intervalId = window.setInterval(
+      refreshWorkerNotices,
+      LIVE_REFRESH_INTERVAL_MS,
+    );
 
     return () => {
       window.removeEventListener("focus", refreshWorkerNotices);
@@ -2919,6 +3108,37 @@ const filteredRecords = useMemo(() => {
     canReviewAdjustmentRequests,
     canReviewExclusionRequests,
     canReviewIncidentRequests,
+  ]);
+
+  useEffect(() => {
+    if (!isManagerMode) return;
+
+    const refreshManagerData = () => {
+      void loadRecords(undefined, { silent: true });
+      void loadPendingRequests(true);
+      void loadPendingIncidentJustifications(true);
+      void loadPendingExclusionRequests(true);
+      void loadManagerTodayExclusions();
+    };
+
+    window.addEventListener("focus", refreshManagerData);
+    const intervalId = window.setInterval(
+      refreshManagerData,
+      LIVE_REFRESH_INTERVAL_MS,
+    );
+
+    return () => {
+      window.removeEventListener("focus", refreshManagerData);
+      window.clearInterval(intervalId);
+    };
+  }, [
+    isManagerMode,
+    canAccessManagementPanel,
+    canReviewAdjustmentRequests,
+    canReviewExclusionRequests,
+    canReviewIncidentRequests,
+    endpointBase,
+    trackerDate,
   ]);
 
   useEffect(() => {
@@ -2968,39 +3188,8 @@ const filteredRecords = useMemo(() => {
   }, [selectedMonth]);
 
   useEffect(() => {
-    if (!isWorkerMode || !showWorkerOverview || !openRecord) {
-      setOpenWorkdayWarning(null);
-      return;
-    }
-
-    const minutesOpen = getOpenWorkdayMinutes(openRecord);
-    const level =
-      minutesOpen >= OPEN_WORKDAY_CRITICAL_MINUTES
-        ? "critical"
-        : minutesOpen >= OPEN_WORKDAY_WARNING_MINUTES
-          ? "warning"
-          : null;
-
-    if (!level) {
-      setOpenWorkdayWarning(null);
-      return;
-    }
-
-    const storageKey = `time-control:open-workday-warning:${openRecord.id}:${level}`;
-    try {
-      if (window.sessionStorage.getItem(storageKey)) {
-        return;
-      }
-    } catch {
-      // Si sessionStorage falla, seguimos mostrando el aviso una vez en memoria.
-    }
-
-    setOpenWorkdayWarning({
-      record: openRecord,
-      level,
-      minutesOpen,
-    });
-  }, [isWorkerMode, openRecord, showWorkerOverview]);
+    setOpenWorkdayWarning(null);
+  }, []);
 
   useEffect(() => {
     if (
@@ -3091,9 +3280,10 @@ const filteredRecords = useMemo(() => {
     }
   };
 
-  const submitAction = async (
+  const runSubmitAction = async (
     endpoint: "/api/time-control/check-in" | "/api/time-control/check-out",
     successMessage: string,
+    tabletCode?: string,
   ) => {
     setSubmitting(true);
     showLoadingPopup("Comprobando ubicación...");
@@ -3105,7 +3295,10 @@ const filteredRecords = useMemo(() => {
         headers: {
           "Content-Type": "application/json",
         },
-        body: JSON.stringify(location),
+        body: JSON.stringify({
+          ...location,
+          tabletCode,
+        }),
       });
 
       if (!response.ok) {
@@ -3121,6 +3314,7 @@ const filteredRecords = useMemo(() => {
       hideLoadingPopup();
       setToast({ tone: "success", message: successMessage });
       setShowLocationHelp(false);
+      window.dispatchEvent(new CustomEvent("time-control:records-updated"));
       await loadRecords();
     } catch (error) {
       const errorMessage =
@@ -3140,6 +3334,38 @@ const filteredRecords = useMemo(() => {
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const submitAction = async (
+    endpoint: "/api/time-control/check-in" | "/api/time-control/check-out",
+    successMessage: string,
+  ) => {
+    if (detectCurrentWorkdayDeviceType() === "TABLET") {
+      setTabletClockAction({ endpoint, successMessage });
+      setTabletClockCode("");
+      setTabletClockError(null);
+      return;
+    }
+
+    await runSubmitAction(endpoint, successMessage);
+  };
+
+  const confirmTabletClockAction = async () => {
+    if (!tabletClockAction) {
+      return;
+    }
+
+    const normalizedCode = tabletClockCode.trim();
+    if (!normalizedCode) {
+      setTabletClockError("Introduce el código de la tablet para continuar.");
+      return;
+    }
+
+    const action = tabletClockAction;
+    setTabletClockAction(null);
+    setTabletClockError(null);
+    await runSubmitAction(action.endpoint, action.successMessage, normalizedCode);
+    setTabletClockCode("");
   };
 
   const postponeOpenWorkdayWarning = () => {
@@ -3273,6 +3499,8 @@ const filteredRecords = useMemo(() => {
     setExclusionRequestType("REMOTE_WORK");
     setExclusionRequestDate("");
     setExclusionRequestReason("");
+    setPermissionLegalType("MEDICAL");
+    setPermissionAttachmentFiles([]);
   };
 
   const submitAdjustmentRequest = async () => {
@@ -3339,7 +3567,7 @@ const filteredRecords = useMemo(() => {
       }
       if (exclusionRequestDate < todaySqlDate) {
         throw new Error(
-          "No se puede solicitar teletrabajo o permiso en días anteriores.",
+          "No se puede solicitar un permiso en días anteriores.",
         );
       }
       if (!trimmedReason) {
@@ -3350,6 +3578,36 @@ const filteredRecords = useMemo(() => {
       const endpoint = isRemoteWork
         ? "/api/remote-work/request"
         : "/api/permissions/request";
+      let uploadedAttachmentUrl: string | null = null;
+
+      if (!isRemoteWork && permissionAttachmentFiles.length > 0) {
+        showLoadingPopup("Subiendo justificante...");
+        const attachmentFormData = new FormData();
+        permissionAttachmentFiles.forEach((file) => {
+          attachmentFormData.append("files", file);
+        });
+
+        const uploadResponse = await fetch(
+          "/api/permissions/upload-attachment",
+          {
+            method: "POST",
+            body: attachmentFormData,
+          },
+        );
+        const uploadData = (await uploadResponse.json()) as {
+          attachmentUrls?: string[];
+          error?: string;
+        };
+        if (!uploadResponse.ok) {
+          throw new Error(
+            uploadData.error ?? "No se pudo subir el justificante.",
+          );
+        }
+        uploadedAttachmentUrl = uploadData.attachmentUrls?.length
+          ? JSON.stringify(uploadData.attachmentUrls)
+          : null;
+        showLoadingPopup("Enviando solicitud...");
+      }
 
       const body = isRemoteWork
         ? {
@@ -3359,6 +3617,8 @@ const filteredRecords = useMemo(() => {
         : {
             permissionDate: exclusionRequestDate,
             reason: trimmedReason,
+            legalPermissionType: permissionLegalType,
+            attachmentUrl: uploadedAttachmentUrl,
           };
 
       const response = await fetch(endpoint, {
@@ -4082,27 +4342,31 @@ const filteredRecords = useMemo(() => {
   ) => {
     const wrapperClass =
       layout === "mobile"
-        ? "sticky bottom-3 z-20 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl shadow-slate-200/70 backdrop-blur"
+        ? "sticky bottom-3 z-20 rounded-2xl border border-slate-200 bg-white/95 p-2 shadow-xl shadow-slate-200/70 backdrop-blur sm:static sm:bottom-auto sm:p-3 sm:shadow-sm"
         : "w-[180px] rounded-xl border border-slate-200 bg-slate-50 p-3 shadow-sm";
     const gridClass =
-      layout === "mobile" ? "grid grid-cols-3 gap-2" : "grid grid-cols-1 gap-2";
+      layout === "mobile"
+        ? "grid grid-cols-1 gap-2 min-[430px]:grid-cols-3"
+        : "grid grid-cols-1 gap-2";
     const actionCardClass =
       layout === "mobile"
-        ? "flex min-h-[86px] flex-col items-center justify-between gap-2 rounded-2xl border border-slate-100 bg-white p-3 text-center shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md active:scale-[0.98]"
+        ? "flex min-h-[64px] flex-row items-center justify-between gap-3 rounded-2xl border border-slate-100 bg-white p-3 text-left shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md active:scale-[0.98] min-[430px]:min-h-[86px] min-[430px]:flex-col min-[430px]:items-center min-[430px]:gap-2 min-[430px]:text-center sm:min-h-0 sm:flex-row sm:text-left"
         : "flex items-center justify-between rounded-2xl border border-slate-100 bg-white p-4 shadow-sm transition-all duration-200 hover:border-slate-200/80 hover:shadow-md";
     const actionTextClass =
-      layout === "mobile" ? "space-y-0.5" : "flex-1 space-y-0.5 pr-4";
+      layout === "mobile"
+        ? "flex-1 space-y-0.5 pr-3 min-[430px]:flex-none min-[430px]:pr-0 sm:flex-1 sm:pr-3"
+        : "flex-1 space-y-0.5 pr-4";
     const actionTitleClass =
       layout === "mobile"
-        ? "text-[11px] font-semibold leading-tight text-slate-900"
+        ? "text-xs font-semibold leading-tight text-slate-900 min-[430px]:text-[11px] sm:text-xs"
         : "text-sm font-semibold text-slate-900";
     const primaryActionTitleClass =
       layout === "mobile"
-        ? "text-[11px] font-semibold leading-tight text-slate-900"
+        ? "text-xs font-semibold leading-tight text-slate-900 min-[430px]:text-[11px] sm:text-xs"
         : "text-sm font-semibold text-slate-900";
     const checkoutActionTitleClass =
       layout === "mobile"
-        ? "text-[11px] font-semibold leading-tight text-rose-700"
+        ? "text-xs font-semibold leading-tight text-rose-700 min-[430px]:text-[11px] sm:text-xs"
         : "text-sm font-semibold text-rose-700";
 
     return (
@@ -4117,7 +4381,41 @@ const filteredRecords = useMemo(() => {
           
           {/* TARJETA 1: Fichar Entrada / Salida */}
           {isWorkerMode && (
-            !openRecord ? (
+            loading ? (
+              <div className={actionCardClass}>
+                <div className={actionTextClass}>
+                  <h3 className={primaryActionTitleClass}>
+                    Comprobando...
+                  </h3>
+                </div>
+                <button
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-50 text-sky-500 shadow-sm disabled:cursor-wait disabled:opacity-80"
+                  disabled
+                  aria-label="Comprobando jornada activa"
+                >
+                  <svg
+                    className="h-4 w-4 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="3"
+                    />
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"
+                    />
+                  </svg>
+                </button>
+              </div>
+            ) : !openRecord ? (
               /* Estado: Iniciar Jornada */
               <div className={actionCardClass}>
                 {/* AÑADIDO flex-1 y pr-4. ELIMINADO max-w-[200px] */}
@@ -4205,6 +4503,26 @@ const filteredRecords = useMemo(() => {
             </button>
           </div>
 
+          {/* TARJETA 4: Solicitar Permiso */}
+          {isWorkerMode ? (
+            <div className={actionCardClass}>
+              <div className={actionTextClass}>
+                <h3 className={actionTitleClass}>Solicitar permiso</h3>
+              </div>
+              <button
+                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-100 text-slate-700 shadow-sm transition-all duration-200 hover:scale-105 hover:bg-slate-200 hover:text-slate-900 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={() => {
+                  setExclusionRequestType("PERMISSION");
+                  setShowExclusionRequestModal(true);
+                }}
+                disabled={submitting}
+                aria-label="Solicitar permiso"
+              >
+                <i className="ti ti-file-certificate text-[18px]" aria-hidden="true" />
+              </button>
+            </div>
+          ) : null}
+
         </div>
       </div>
     );
@@ -4214,7 +4532,6 @@ const filteredRecords = useMemo(() => {
     const trustLevel = getDisplayTrustLevel(record);
     const trustLabel = getDisplayTrustLabel(record);
     const trustClass = TRUST_LEVEL_CLASSES[trustLevel];
-    const hasIncident = record.status === "INCIDENT";
     const displayStatus = STATUS_LABELS[getDisplayRecordStatus(record)];
     const reviewDetailItems = getStatusDetailItems(record);
     const expectedMinutes = 480;
@@ -4279,6 +4596,7 @@ const filteredRecords = useMemo(() => {
       label: string,
       time: string,
       tone: "emerald" | "sky",
+      deviceType: WorkdayDeviceType | null,
       ipAddress: string | null,
       latitude: number | null,
       longitude: number | null,
@@ -4293,9 +4611,12 @@ const filteredRecords = useMemo(() => {
       return (
         <span className="group relative inline-flex">
           <span
-            className={`inline-flex items-center gap-1.5 rounded-xl border bg-white px-3 py-1.5 font-mono text-base font-bold shadow-sm transition ${toneClasses}`}
+            className={`inline-flex items-center gap-2 rounded-xl border bg-white px-3 py-1.5 shadow-sm transition ${toneClasses}`}
           >
-            {time}
+            <span className="font-mono text-base font-bold">{time}</span>
+            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-sans text-[10px] font-bold uppercase tracking-wide text-slate-500">
+              {getDeviceTypeLabel(deviceType)}
+            </span>
             <i className={`ti ti-info-circle text-[14px] ${iconClass}`} aria-hidden="true" />
           </span>
           <span className="absolute left-0 top-full z-50 hidden w-72 pt-2 group-hover:block">
@@ -4325,14 +4646,14 @@ const filteredRecords = useMemo(() => {
               </span>
             </div>
 
-            <div className="mt-4 grid gap-4 sm:grid-cols-2">
-              <div>
+            <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto]">
+              <div className="min-w-0">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   Rango horario
                 </span>
-                <div className="mt-0.5 flex items-center gap-1.5">
+                <div className="mt-0.5 flex items-start gap-1.5">
                   <svg
-                    className="h-4 w-4 shrink-0 text-slate-400"
+                    className="mt-2 h-4 w-4 shrink-0 text-slate-400"
                     fill="none"
                     stroke="currentColor"
                     viewBox="0 0 24 24"
@@ -4344,12 +4665,24 @@ const filteredRecords = useMemo(() => {
                       d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                     />
                   </svg>
-                  <span className="font-mono text-xl font-bold tracking-tight text-slate-800">
-                    {getRecordLine(record)}
+                  <span className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center rounded-xl border border-sky-200 bg-white px-3 py-1.5 font-mono text-base font-bold text-sky-700 shadow-sm">
+                      {formatTimeOnly(record.checkInAt)}
+                    </span>
+                    <span className="font-mono text-lg font-bold text-slate-400">-</span>
+                    {record.checkOutAt ? (
+                      <span className="inline-flex items-center rounded-xl border border-sky-200 bg-white px-3 py-1.5 font-mono text-base font-bold text-sky-700 shadow-sm">
+                        {formatTimeOnly(record.checkOutAt)}
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-mono text-base font-bold text-slate-500 shadow-sm">
+                        Sin salida
+                      </span>
+                    )}
                   </span>
                 </div>
               </div>
-              <div className="sm:text-right">
+              <div className="min-w-0 md:text-right">
                 <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                   Tiempo computado
                 </span>
@@ -4431,14 +4764,14 @@ const filteredRecords = useMemo(() => {
             </div>
           </div>
 
-          <div className="mt-4 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
-            <div>
+          <div className="mt-4 grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-start">
+            <div className="min-w-0">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                 Rango horario
               </span>
-              <div className="mt-0.5 flex items-center gap-1.5">
+              <div className="mt-0.5 flex items-start gap-1.5">
                 <svg
-                  className="h-4 w-4 shrink-0 text-slate-400"
+                  className="mt-2 h-4 w-4 shrink-0 text-slate-400"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"
@@ -4450,40 +4783,36 @@ const filteredRecords = useMemo(() => {
                     d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
                   />
                 </svg>
-                {isManagerMode && isFunctionalAdmin ? (
-                  <span className="flex flex-wrap items-center gap-2">
-                    {renderTechnicalHover(
-                      "Entrada",
-                      formatTimeOnly(record.checkInAt),
-                      "emerald",
-                      record.checkInIpAddress,
-                      record.checkInLatitude,
-                      record.checkInLongitude,
-                    )}
-                    <span className="font-mono text-lg font-bold text-slate-400">-</span>
-                    {record.checkOutAt ? (
-                      renderTechnicalHover(
-                        "Salida",
-                        formatTimeOnly(record.checkOutAt),
-                        "sky",
-                        record.checkOutIpAddress,
-                        record.checkOutLatitude,
-                        record.checkOutLongitude,
-                      )
-                    ) : (
-                      <span className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-mono text-base font-bold text-slate-500 shadow-sm">
-                        Sin salida
-                      </span>
-                    )}
-                  </span>
-                ) : (
-                  <span className="font-mono text-xl font-bold tracking-tight text-slate-800">
-                    {getRecordLine(record)}
-                  </span>
-                )}
+                <span className="flex flex-wrap items-center gap-2">
+                  {renderTechnicalHover(
+                    "Entrada",
+                    formatTimeOnly(record.checkInAt),
+                    "emerald",
+                    record.checkInDeviceType,
+                    record.checkInIpAddress,
+                    record.checkInLatitude,
+                    record.checkInLongitude,
+                  )}
+                  <span className="font-mono text-lg font-bold text-slate-400">-</span>
+                  {record.checkOutAt ? (
+                    renderTechnicalHover(
+                      "Salida",
+                      formatTimeOnly(record.checkOutAt),
+                      "sky",
+                      record.checkOutDeviceType,
+                      record.checkOutIpAddress,
+                      record.checkOutLatitude,
+                      record.checkOutLongitude,
+                    )
+                  ) : (
+                    <span className="inline-flex items-center rounded-xl border border-slate-200 bg-white px-3 py-1.5 font-mono text-base font-bold text-slate-500 shadow-sm">
+                      Sin salida
+                    </span>
+                  )}
+                </span>
               </div>
             </div>
-            <div className="shrink-0 sm:text-right">
+            <div className="min-w-0 md:text-right">
               <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
                 Tiempo computado
               </span>
@@ -4515,14 +4844,15 @@ const filteredRecords = useMemo(() => {
           </div>
 
           {isManagerMode && isFunctionalAdmin && record.status === "OPEN" ? (
-            <div className="mt-4 flex justify-end border-t border-slate-100 pt-4">
+<div className="mt-4 flex justify-end border-t border-slate-100 pt-4">
   <button
     type="button"
-    className="group inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl px-3.5 py-2 shadow-sm transition-all duration-300 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+    className="group inline-flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium rounded-xl px-3.5 py-2 shadow-sm transition-all duration-300 hover:shadow-md hover:shadow-blue-600/20 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
     onClick={() => openAdminCloseModal(record)}
   >
     <svg
-      className="h-3.5 w-3.5 text-blue-100 transition-transform duration-300 group-hover:scale-110 group-hover:rotate-3"
+      /* Cambiado a transition-all, subido el scale a 125, la rotación a 12 y cambia a blanco puro */
+      className="h-3.5 w-3.5 text-blue-200 transition-all duration-300 group-hover:scale-125 group-hover:rotate-12 group-hover:text-white"
       fill="none"
       viewBox="0 0 24 24"
       stroke="currentColor"
@@ -4556,7 +4886,7 @@ const filteredRecords = useMemo(() => {
               <h6 className="text-xs font-bold uppercase tracking-wider text-sky-700">
                 Motivos de revisión
               </h6>
-              {hasIncident && trustLevel === "REVIEW" && reviewDetailItems.length > 0 ? (
+              {trustLevel === "REVIEW" && reviewDetailItems.length > 0 ? (
                 <div className="mt-3 flex flex-wrap gap-2">
                   {reviewDetailItems.map((item) => (
                     <span
@@ -4599,171 +4929,6 @@ const filteredRecords = useMemo(() => {
               </div>
             </div>
           </div>
-        ) : null}
-
-        
-
-        {!isManagerMode || !isFunctionalAdmin ? (
-        <div className="space-y-3 rounded-2xl border border-slate-100 bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between gap-3">
-            <h5 className="text-xs font-bold uppercase tracking-widest text-slate-400">
-              Registro de eventos
-            </h5>
-            <span className="text-xs text-slate-400">
-              Datos técnicos plegables
-            </span>
-          </div>
-
-          <div className="space-y-3">
-            <div className="rounded-xl border border-emerald-100 bg-emerald-50/40 px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 ring-4 ring-emerald-50 shadow-sm">
-                    <div className="h-1.5 w-1.5 rounded-full bg-white" />
-                  </div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-emerald-700">
-                    Entrada registrada
-                  </span>
-                  <span className="rounded bg-white px-2 py-0.5 text-[11px] font-bold text-slate-500">
-                    {getDeviceTypeLabel(record.checkInDeviceType)}
-                  </span>
-                </div>
-                <span className="font-mono text-lg font-bold text-slate-800">
-                  {formatTimeOnly(record.checkInAt)}
-                </span>
-              </div>
-              <details className="group mt-2">
-                <summary className="cursor-pointer list-none text-xs font-semibold text-slate-500 transition hover:text-sky-700">
-                  Ver datos técnicos de entrada
-                </summary>
-                <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-white/90 p-3 text-xs text-slate-600">
-                  <p>
-                    <span className="font-semibold text-slate-700">IP:</span>{" "}
-                    {record.checkInIpAddress || "—"}
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-slate-700">
-                      Ubicación:
-                    </span>
-                    {record.checkInLatitude !== null &&
-                    record.checkInLongitude !== null ? (
-                      <a
-                        href={getMapsUrl(
-                          record.checkInLatitude,
-                          record.checkInLongitude,
-                        )}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                      >
-                        <svg
-                          className="mr-1 h-3.5 w-3.5 shrink-0 text-slate-400"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                          />
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth="2"
-                            d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                          />
-                        </svg>
-                        {record.checkInLatitude.toFixed(6)},{" "}
-                        {record.checkInLongitude.toFixed(6)}
-                      </a>
-                    ) : (
-                      <span className="text-slate-400">—</span>
-                    )}
-                  </div>
-                </div>
-              </details>
-            </div>
-
-            <div className="rounded-xl border border-rose-100 bg-rose-50/30 px-4 py-3">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-4 w-4 items-center justify-center rounded-full bg-rose-400 ring-4 ring-rose-50 shadow-sm">
-                    <div className="h-1.5 w-1.5 rounded-full bg-white" />
-                  </div>
-                  <span className="text-xs font-bold uppercase tracking-wider text-rose-600">
-                    Salida registrada
-                  </span>
-                  {record.checkOutAt ? (
-                    <span className="rounded bg-white px-2 py-0.5 text-[11px] font-bold text-slate-500">
-                      {getDeviceTypeLabel(record.checkOutDeviceType)}
-                    </span>
-                  ) : null}
-                </div>
-                <span className="font-mono text-lg font-bold text-slate-800">
-                  {record.checkOutAt
-                    ? formatTimeOnly(record.checkOutAt)
-                    : "Sin registrar"}
-                </span>
-              </div>
-              {record.checkOutAt ? (
-                <details className="group mt-2">
-                  <summary className="cursor-pointer list-none text-xs font-semibold text-slate-500 transition hover:text-sky-700">
-                    Ver datos técnicos de salida
-                  </summary>
-                  <div className="mt-2 space-y-2 rounded-xl border border-slate-200 bg-white/90 p-3 text-xs text-slate-600">
-                    <p>
-                      <span className="font-semibold text-slate-700">IP:</span>{" "}
-                      {record.checkOutIpAddress || "—"}
-                    </p>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-semibold text-slate-700">
-                        Ubicación:
-                      </span>
-                      {record.checkOutLatitude !== null &&
-                      record.checkOutLongitude !== null ? (
-                        <a
-                          href={getMapsUrl(
-                            record.checkOutLatitude,
-                            record.checkOutLongitude,
-                          )}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-semibold text-slate-700 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
-                        >
-                          <svg
-                            className="mr-1 h-3.5 w-3.5 shrink-0 text-slate-400"
-                            fill="none"
-                            stroke="currentColor"
-                            viewBox="0 0 24 24"
-                          >
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"
-                            />
-                            <path
-                              strokeLinecap="round"
-                              strokeLinejoin="round"
-                              strokeWidth="2"
-                              d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"
-                            />
-                          </svg>
-                          {record.checkOutLatitude.toFixed(6)},{" "}
-                          {record.checkOutLongitude.toFixed(6)}
-                        </a>
-                      ) : (
-                        <span className="text-slate-400">—</span>
-                      )}
-                    </div>
-                  </div>
-                </details>
-              ) : null}
-            </div>
-          </div>
-        </div>
         ) : null}
 
         
@@ -4993,21 +5158,25 @@ const filteredRecords = useMemo(() => {
                           </p>
 
                           <div className="mt-2 flex items-center gap-2">
-                            {openRecord && (
+                            {openRecord && !loading ? (
                               <span className="relative flex h-2.5 w-2.5">
                                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                                 <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                               </span>
-                            )}
+                            ) : null}
                             <p className="text-xl font-bold tracking-tight text-slate-900">
-                              {openRecord
+                              {loading
+                                ? "Comprobando jornada..."
+                                : openRecord
                                 ? "Jornada abierta"
                                 : "Sin jornada abierta"}
                             </p>
                           </div>
 
                           <p className="mt-1 text-xs font-medium text-slate-500">
-                            {openRecord
+                            {loading
+                              ? "Estamos revisando si hay una jornada activa."
+                              : openRecord
                               ? `Abierta desde ${formatDateTime(openRecord.checkInAt)}.`
                               : "Última entrada registrada."}
                           </p>
@@ -5015,12 +5184,35 @@ const filteredRecords = useMemo(() => {
 
                         <div
                           className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-xl ${
-                            openRecord
+                            openRecord && !loading
                               ? "bg-emerald-50 text-emerald-600"
-                              : "bg-slate-50 text-slate-400"
+                              : loading
+                                ? "bg-sky-50 text-sky-500"
+                                : "bg-slate-50 text-slate-400"
                           }`}
                         >
-                          {openRecord ? (
+                          {loading ? (
+                            <svg
+                              className="h-6 w-6 animate-spin"
+                              fill="none"
+                              viewBox="0 0 24 24"
+                              aria-hidden="true"
+                            >
+                              <circle
+                                className="opacity-25"
+                                cx="12"
+                                cy="12"
+                                r="10"
+                                stroke="currentColor"
+                                strokeWidth="3"
+                              />
+                              <path
+                                className="opacity-75"
+                                fill="currentColor"
+                                d="M4 12a8 8 0 018-8v3a5 5 0 00-5 5H4z"
+                              />
+                            </svg>
+                          ) : openRecord ? (
                             <svg
                               xmlns="http://www.w3.org/2000/svg"
                               fill="none"
@@ -5090,7 +5282,7 @@ const filteredRecords = useMemo(() => {
                   </div>
                   <div className="space-y-4">
                     {/* Acciones rápidas - móvil, tablet y portátil */}
-                    <div className="min-[1800px]:hidden">
+                    <div className="min-[1800px]:hidden sm:rounded-2xl">
                       {renderQuickActionsCard("mobile")}
                     </div>
 
@@ -6061,13 +6253,13 @@ const filteredRecords = useMemo(() => {
             <>
               <div className="space-y-5 rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
                 {showCoordinatorModeBanner ? (
-                  <div className="flex items-center gap-2.5 px-1 py-0.5 text-xs text-slate-500">
+                  <div className="flex flex-col items-start gap-2 rounded-2xl border border-cyan-100 bg-cyan-50/40 px-3 py-3 text-xs text-slate-600 sm:flex-row sm:items-center sm:px-1 sm:py-0.5 sm:bg-transparent sm:border-0">
                     <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-cyan-50 px-2.5 py-0.5 text-xs font-medium text-cyan-700 ring-1 ring-inset ring-cyan-700/10">
                       <span className="h-1.5 w-1.5 rounded-full bg-cyan-500"></span>
                       Vista de Coordinación
                     </span>
-                    <p>
-                      Aquí solo verás registros con desajustes horarios de los trabajadores de tu ámbito.
+                    <p className="max-w-full leading-5 sm:max-w-xl">
+                      Aquí solo verás registros horarios de los trabajadores de tu ámbito.
                     </p>
                   </div>
                 ) : null}
@@ -6273,13 +6465,13 @@ const filteredRecords = useMemo(() => {
               {/* 3. CUADRANTE DIARIO */}
               {canViewTeamRecords && managerReviewTab === "tracker" ? (
                 <div
-                  className="mb-12 overflow-hidden rounded-[2.5rem] border border-slate-200 bg-white shadow-sm transition-all hover:shadow-md"
+                  className="mb-12 overflow-hidden rounded-[1.5rem] border border-slate-200 bg-white shadow-sm transition-all hover:shadow-md sm:rounded-[2.5rem]"
                   id="cuadrante-diario"
                 >
                   {/* Cabecera del Cuadrante */}
-                  <div className="border-b border-slate-100 p-5 lg:p-6">
-  <div className="flex flex-wrap items-start justify-between gap-4">
-   <div className="space-y-1">
+                  <div className="border-b border-slate-100 p-4 sm:p-5 lg:p-6">
+  <div className="flex flex-col items-stretch gap-4 lg:flex-row lg:items-start lg:justify-between">
+   <div className="min-w-0 space-y-1">
         <div className="flex items-center gap-2">
           <span className="text-xs font-semibold uppercase tracking-wider text-slate-500">
             Visualizador Temporal
@@ -6288,8 +6480,8 @@ const filteredRecords = useMemo(() => {
         
         {/* Zona Interactiva del Título (Trigger del Hover) */}
         <div className="relative group inline-block">
-          <div className="flex items-center gap-1.5 cursor-help select-none">
-            <h3 className="text-lg font-bold text-slate-900 lg:text-xl">
+          <div className="flex min-w-0 items-center gap-1.5 cursor-help select-none">
+            <h3 className="min-w-0 text-lg font-bold leading-tight text-slate-900 lg:text-xl">
               Cuadrante de fichajes
             </h3>
             {/* Pequeño indicador visual de ayuda */}
@@ -6299,7 +6491,7 @@ const filteredRecords = useMemo(() => {
           </div>
 
           {/* Popover Flotante: Contiene los estados y validaciones */}
-          <div className="absolute top-full left-0 z-50 mt-2 pointer-events-none opacity-0 scale-95 group-hover:pointer-events-auto group-hover:opacity-100 group-hover:scale-100 flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xl transition-all duration-150 ease-out min-w-[320px] sm:min-w-[420px]">
+          <div className="absolute top-full left-0 z-50 mt-2 pointer-events-none opacity-0 scale-95 group-hover:pointer-events-auto group-hover:opacity-100 group-hover:scale-100 flex max-w-[calc(100vw-2rem)] flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xl transition-all duration-150 ease-out min-w-[260px] sm:min-w-[420px]">
             <div className="border-b border-slate-100 pb-1.5">
               <p className="text-xs font-bold text-slate-700 uppercase tracking-wider">Leyenda de marcas</p>
             </div>
@@ -6322,13 +6514,13 @@ const filteredRecords = useMemo(() => {
           </div>
         </div>
 
-        <p className="max-w-2xl text-sm text-slate-500">
+        <p className="max-w-2xl text-sm leading-5 text-slate-500">
           Distribución horaria de la actividad del equipo por slots de 60 minutos.
         </p>
       </div>
 
     {/* Navegación de Fecha Refinada */}
-    <div className="flex items-center gap-1 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 shadow-sm">
+    <div className="flex w-full items-center gap-1 rounded-2xl border border-slate-200 bg-slate-50 p-1.5 shadow-sm sm:w-auto">
       <button
         type="button"
         onClick={() => adjustTrackerDate(-1)}
@@ -6339,12 +6531,12 @@ const filteredRecords = useMemo(() => {
         </svg>
       </button>
 
-      <div className="px-4">
+      <div className="min-w-0 flex-1 px-2 text-center sm:flex-none sm:px-4">
         <input
           type="date"
           value={trackerDate}
           onChange={(e) => setTrackerDate(e.target.value)}
-          className="bg-transparent text-sm font-black uppercase tracking-tight text-slate-700 outline-none cursor-pointer"
+          className="w-full min-w-0 bg-transparent text-center text-sm font-black uppercase tracking-tight text-slate-700 outline-none cursor-pointer sm:w-auto"
         />
       </div>
 
@@ -6361,10 +6553,10 @@ const filteredRecords = useMemo(() => {
   </div>
 
   {/* CONTENEDOR PRINCIPAL DE FILTROS DEL CUADRANTE */}
-  <div className="mt-6 mb-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
-    <div className="flex flex-wrap items-end gap-4">
+  <div className="mt-6 mb-2 rounded-2xl border border-slate-100 bg-slate-50/50 p-3 shadow-sm backdrop-blur-sm sm:p-4">
+    <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end">
       {/* 1. Buscar Trabajador (El primero y expandido) */}
-      <div className="min-w-[280px] flex-1">
+      <div className="w-full min-w-0 flex-1 sm:min-w-[280px]">
         <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
           Buscar Trabajador
         </label>
@@ -6386,7 +6578,7 @@ const filteredRecords = useMemo(() => {
       </div>
 
       {/* 2. Filtro de Estado */}
-      <div className="w-[200px] shrink-0">
+      <div className="w-full shrink-0 sm:w-[200px]">
         <Select
           id="trackerStatusFilter"
           label="Estado"
@@ -6404,7 +6596,7 @@ const filteredRecords = useMemo(() => {
       </div>
 
       {/* 3. Filtro de Validación */}
-      <div className="w-[200px] shrink-0">
+      <div className="w-full shrink-0 sm:w-[200px]">
         <Select
           id="trackerTrustFilter"
           label="Validación"
@@ -6444,7 +6636,8 @@ const filteredRecords = useMemo(() => {
                           const nowH = now.getHours();
                           const nowM = now.getMinutes();
                           if (nowH < TRACKER_HOURS[0] || nowH > TRACKER_HOURS[TRACKER_HOURS.length - 1]) return null;
-                          const WORKER_COL_WIDTH = 240;
+                          const WORKER_COL_WIDTH =
+                            window.innerWidth < 640 ? 154 : 240;
                           const HOUR_COL_WIDTH = 64;
                           const hIndex = TRACKER_HOURS.indexOf(nowH);
                           if (hIndex === -1) return null;
@@ -6469,7 +6662,7 @@ const filteredRecords = useMemo(() => {
                             <tr className="bg-slate-50/50">
                               <th
                                 data-tracker-worker-header="true"
-                                className="sticky left-0 z-30 min-w-[240px] border-b border-r border-slate-100 bg-slate-50 px-6 py-4 text-left font-black uppercase tracking-widest text-slate-400"
+                                className="sticky left-0 z-30 min-w-[154px] max-w-[154px] border-b border-r border-slate-100 bg-slate-50 px-3 py-4 text-left font-black uppercase tracking-widest text-slate-400 sm:min-w-[240px] sm:max-w-none sm:px-6"
                               >
                                 Trabajador
                               </th>
@@ -6504,7 +6697,7 @@ const filteredRecords = useMemo(() => {
                                   className="group hover:bg-slate-50/30"
                                 >
                                   <td
-                                    className="sticky left-0 z-20 min-w-[240px] cursor-pointer border-b border-r border-slate-100 bg-white px-6 py-4 font-bold text-slate-700 transition-colors group-hover:bg-slate-50/80"
+                                    className="sticky left-0 z-20 min-w-[154px] max-w-[154px] cursor-pointer border-b border-r border-slate-100 bg-white px-3 py-4 text-[11px] font-bold leading-tight text-slate-700 transition-colors group-hover:bg-slate-50/80 sm:min-w-[240px] sm:max-w-none sm:px-6 sm:text-xs"
                                     onClick={() => {
                                       const firstRecord = userRecords[0];
                                       if (firstRecord)
@@ -6521,6 +6714,7 @@ const filteredRecords = useMemo(() => {
                                     const matchingRecord = getHourlySlotRecord(
                                       userRecords,
                                       h,
+                                      trackerDate,
                                     );
                                     const now = new Date();
                                     const isCurrentHour =
@@ -6542,6 +6736,7 @@ const filteredRecords = useMemo(() => {
                                       getSlotProportionalOffset(
                                         matchingRecord,
                                         h,
+                                        trackerDate,
                                       );
                                     const colorClasses =
                                       getQuadrantRecordColorClasses(
@@ -6556,51 +6751,44 @@ const filteredRecords = useMemo(() => {
                                     const shortSegmentMinWidth =
                                       matchingRecord.workedMinutes > 0 &&
                                       matchingRecord.workedMinutes < 30
-                                        ? "16px"
+                                        ? "18px"
                                         : undefined;
                                     return (
-                                      <td
-                                        key={`cell-${member.id}-${h}`}
-                                        className={`border-b border-slate-100 p-1.5 ${isCurrentHour ? "bg-blue-50/20" : ""}`}
-                                      >
-                                        <div
-                                          style={{
-                                            paddingLeft: `${leftFraction * 100}%`,
-                                            paddingRight: `${rightFraction * 100}%`,
-                                          }}
-                                        >
-                                          <div
-                                            onClick={() =>
-                                              setSelectedRecordForDetail(
-                                                matchingRecord,
-                                              )
-                                            }
-                                            onMouseEnter={(e) =>
-                                              setTrackerTooltip({
-                                                x: e.clientX,
-                                                y: e.clientY,
-                                                member,
-                                                record: matchingRecord,
-                                              })
-                                            }
-                                            onMouseMove={(e) =>
-                                              setTrackerTooltip((prev) =>
-                                                prev
-                                                  ? { ...prev, x: e.clientX, y: e.clientY }
-                                                  : null,
-                                              )
-                                            }
-                                            onMouseLeave={() => setTrackerTooltip(null)}
-                                            style={{ minWidth: shortSegmentMinWidth }}
-                                            className={`h-9 w-full cursor-pointer rounded-lg shadow-lg ring-1 ring-white/20 transition-all duration-200 active:scale-95 hover:brightness-110 ${colorClasses} ${
-                                              leftFraction > 0
-                                                ? "rounded-l-sm"
-                                                : ""
-                                            } ${rightFraction > 0 ? "rounded-r-sm" : ""}`}
-                                          />
-                                        </div>
-                                      </td>
-                                    );
+  <td
+    key={`cell-${member.id}-${h}`}
+    className={`border-b border-slate-100 p-1.5 ${isCurrentHour ? "bg-blue-50/20" : ""}`}
+  >
+    {/* Contenedor sin paddings para que ocupe el 100% del hueco */}
+    <div>
+      <div
+        onClick={() =>
+          setSelectedRecordForDetail(
+            matchingRecord,
+          )
+        }
+        onMouseEnter={(e) =>
+          setTrackerTooltip({
+            x: e.clientX,
+            y: e.clientY,
+            member,
+            record: matchingRecord,
+          })
+        }
+        onMouseMove={(e) =>
+          setTrackerTooltip((prev) =>
+            prev
+              ? { ...prev, x: e.clientX, y: e.clientY }
+              : null,
+          )
+        }
+        onMouseLeave={() => setTrackerTooltip(null)}
+        style={{ minWidth: shortSegmentMinWidth }}
+        // Mantiene rounded-lg siempre para que sea una píldora perfecta sin cortes
+        className={`h-9 w-full cursor-pointer rounded-lg shadow-lg ring-1 ring-white/20 transition-all duration-200 active:scale-95 hover:brightness-110 ${colorClasses}`}
+      />
+    </div>
+  </td>
+);
                                   })}
                                 </tr>
                               );
@@ -6635,10 +6823,10 @@ const filteredRecords = useMemo(() => {
 
 {/* CONTENEDOR PRINCIPAL DE FILTROS - VISTA DETALLADA (REGISTROS) */}
 <div className="mb-6 rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
-  <div className="flex flex-wrap items-end gap-4">
+  <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end">
 
     {/* 1. Buscador de Trabajador */}
-    <div className="min-w-[280px] flex-1">
+    <div className="w-full min-w-0 flex-1 sm:min-w-[280px]">
       <label htmlFor="managerUserFilter" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
         Trabajador
       </label>
@@ -6650,7 +6838,7 @@ const filteredRecords = useMemo(() => {
           value={managerUserSearch}
           placeholder="Busca por nombre o selecciona uno..."
           autoComplete="off"
-          className="h-10 w-full rounded-xl border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
+          className="h-10 w-full min-w-0 rounded-xl border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
           onChange={(event) => {
             const nextValue = event.target.value;
             const normalizedValue = nextValue.trim().toLocaleLowerCase("es-ES");
@@ -6678,7 +6866,7 @@ const filteredRecords = useMemo(() => {
     </div>
 
     {/* 2. Filtro Fecha Desde */}
-    <div className="w-[140px] shrink-0">
+    <div className="w-full shrink-0 sm:w-[140px]">
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
         Desde (Fecha)
       </label>
@@ -6691,7 +6879,7 @@ const filteredRecords = useMemo(() => {
     </div>
 
     {/* 3. Filtro Fecha Hasta */}
-    <div className="w-[140px] shrink-0">
+    <div className="w-full shrink-0 sm:w-[140px]">
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
         Hasta (Fecha)
       </label>
@@ -6704,7 +6892,7 @@ const filteredRecords = useMemo(() => {
     </div>
 
     {/* 4. Filtro Hora Desde */}
-    <div className="w-[120px] shrink-0">
+    <div className="w-full shrink-0 sm:w-[120px]">
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
         Hora Desde
       </label>
@@ -6717,7 +6905,7 @@ const filteredRecords = useMemo(() => {
     </div>
 
     {/* 5. Filtro Hora Hasta */}
-    <div className="w-[120px] shrink-0">
+    <div className="w-full shrink-0 sm:w-[120px]">
       <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
         Hora Hasta
       </label>
@@ -6730,10 +6918,10 @@ const filteredRecords = useMemo(() => {
     </div>
 
     {/* 6. Botón de Limpiar Filtros (Alineado automáticamente a la derecha) */}
-    <div className="ml-auto shrink-0">
+    <div className="w-full shrink-0 sm:ml-auto sm:w-auto">
       <button
         type="button"
-        className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
+        className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95 sm:w-auto"
         onClick={() => {
           setManagerUserSearch("");
           setManagerUserFilter("");
@@ -6773,10 +6961,10 @@ const filteredRecords = useMemo(() => {
                       
                       {/* --- NUEVO BLOQUE DE FILTROS ESTILIZADO --- */}
                       <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
-                        <div className="flex flex-wrap items-end gap-4">
+                        <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end">
 
                           {/* 1. Trabajador (Se expande) */}
-                          <div className="min-w-[240px] flex-1">
+                          <div className="w-full min-w-0 flex-1 sm:min-w-[240px]">
                             <label htmlFor="requestsUserFilterManager" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
                               Trabajador
                             </label>
@@ -6788,7 +6976,7 @@ const filteredRecords = useMemo(() => {
                                 value={requestsUserSearch}
                                 placeholder="Todos los trabajadores..."
                                 autoComplete="off"
-                                className="h-10 w-full rounded-xl border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
+                                className="h-10 w-full min-w-0 rounded-xl border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
                                 onChange={(event) => {
                                   const nextValue = event.target.value;
                                   setRequestsUserSearch(nextValue);
@@ -6812,7 +7000,7 @@ const filteredRecords = useMemo(() => {
                           </div>
 
                           {/* 2. Fecha Desde */}
-                          <div className="w-[140px] shrink-0">
+                          <div className="w-full shrink-0 sm:w-[140px]">
                             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
                               Desde
                             </label>
@@ -6825,7 +7013,7 @@ const filteredRecords = useMemo(() => {
                           </div>
 
                           {/* 3. Fecha Hasta */}
-                          <div className="w-[140px] shrink-0">
+                          <div className="w-full shrink-0 sm:w-[140px]">
                             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
                               Hasta
                             </label>
@@ -6838,7 +7026,7 @@ const filteredRecords = useMemo(() => {
                           </div>
 
                           {/* 4. Estado */}
-                          <div className="w-[200px] shrink-0">
+                          <div className="w-full shrink-0 sm:w-[200px]">
                             <Select
                               id="requestsStatusFilterManager"
                               label="Estado"
@@ -6846,17 +7034,17 @@ const filteredRecords = useMemo(() => {
                               onChange={(e) => setRequestsStatusFilter(e.target.value)}
                               options={[
                                 { value: "", label: "Todos" },
-                                { value: "PENDING_COORDINATOR", label: "Pendiente Coordinador" },
-                                { value: "PENDING_ADMIN", label: "Pendiente Admin" },
+                                { value: "PENDING_COORDINATOR", label: "Pendiente administración" },
+                                { value: "PENDING_ADMIN", label: "Pendiente administración" },
                               ]}
                             />
                           </div>
 
                           {/* 5. Botón Limpiar */}
-                          <div className="ml-auto shrink-0">
+                          <div className="w-full shrink-0 sm:ml-auto sm:w-auto">
                             <button
                               type="button"
-                              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
+                              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95 sm:w-auto"
                               onClick={clearRequestFilters}
                             >
                               <i className="ti ti-brush" style={{ fontSize: "16px" }} aria-hidden="true"></i>
@@ -6988,7 +7176,17 @@ const filteredRecords = useMemo(() => {
           }
           className="inline-flex items-center justify-center rounded-xl border border-rose-200 bg-white px-3.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 shadow-sm transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Rechazar
+          <svg
+            className="mr-1.5 h-3.5 w-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+          </svg>
+          <span>Rechazar</span>
         </button>
         <button
           onClick={() =>
@@ -7000,7 +7198,17 @@ const filteredRecords = useMemo(() => {
           }
           className="inline-flex items-center justify-center rounded-xl bg-emerald-600 px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 shadow-sm transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          Aprobar
+          <svg
+            className="mr-1.5 h-3.5 w-3.5"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={2}
+            aria-hidden="true"
+          >
+            <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+          </svg>
+          <span>Aprobar</span>
         </button>
       </>
     ) : null}
@@ -7037,7 +7245,7 @@ const filteredRecords = useMemo(() => {
 
                     <div className="space-y-8">
 {isCoordinatorManagerView ? (
-  <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
+  <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-3 shadow-sm backdrop-blur-sm sm:p-4">
     <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">
@@ -7078,7 +7286,7 @@ const filteredRecords = useMemo(() => {
       </div>
     </div>
 
-    <div className="grid grid-cols-7 gap-2 text-center">
+    <div className="grid grid-cols-7 gap-1.5 text-center sm:gap-2">
       {CALENDAR_WEEKDAY_LABELS.map((label, index) => (
         <div
           key={`tracker-calendar-weekday-${label}`}
@@ -7093,7 +7301,7 @@ const filteredRecords = useMemo(() => {
           return (
             <div
               key={`tracker-calendar-empty-${index}`}
-              className="h-12 rounded-xl border border-transparent"
+              className="h-10 rounded-xl border border-transparent sm:h-12"
             />
           );
         }
@@ -7112,11 +7320,11 @@ const filteredRecords = useMemo(() => {
                 setCoordinatorCalendarDetailDate(cell.workDate!);
               }
             }}
-            className={`flex h-12 flex-col items-center justify-center rounded-xl border text-sm font-semibold transition ${
+            className={`flex h-10 flex-col items-center justify-center rounded-xl border text-xs font-semibold transition sm:h-12 sm:text-sm ${
               isSelected
                 ? "border-slate-900 bg-slate-900 text-white shadow-sm"
                 : incidentCount > 0
-                  ? "border-orange-200 bg-orange-50 text-orange-700 hover:border-orange-300 hover:bg-orange-100"
+                  ? "border-sky-200 bg-sky-50 text-sky-700 hover:border-sky-300 hover:bg-sky-100"
                   : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"
             } ${cell.isWeekend ? "text-rose-500" : ""} ${cell.isToday && !isSelected ? "ring-2 ring-sky-100" : ""}`}
           >
@@ -7126,7 +7334,7 @@ const filteredRecords = useMemo(() => {
                 incidentCount > 0
                   ? isSelected
                     ? "bg-white"
-                    : "bg-orange-500"
+                    : "bg-sky-500"
                   : isSelected
                     ? "bg-white/60"
                     : "bg-transparent"
@@ -7142,8 +7350,8 @@ const filteredRecords = useMemo(() => {
         Día seleccionado: {formatShortDate(trackerDate)}
       </span>
       <span className="inline-flex items-center gap-1.5">
-        <span className="h-2 w-2 rounded-full bg-orange-500" />
-        Días con desajustes horarios
+        <span className="h-2 w-2 rounded-full bg-sky-500" />
+        Días con revisión
       </span>
     </div>
   </div>
@@ -7312,7 +7520,7 @@ const filteredRecords = useMemo(() => {
                       {/* Sección 2: Anomalías Detectadas (Sin justificar necesariamente) */}
                       <div className="space-y-4">
                         <div className="flex items-center gap-3">
-                          <div className="h-1.5 w-1.5 rounded-full bg-orange-500" />
+                          <div className="h-1.5 w-1.5 rounded-full bg-sky-500" />
                           <h4 className="text-sm font-bold uppercase tracking-wider text-slate-700">
                             {isCoordinatorManagerView
                               ? "Registros horarios revisables ("
@@ -7500,15 +7708,25 @@ const filteredRecords = useMemo(() => {
                                     <p className="text-sm text-slate-700 md:hidden">
                                       {getRecordLine(record)}
                                     </p>
-                                    {isCoordinatorManagerView ? (
-                                      <p className="truncate text-sm text-slate-700">
-                                        {getCoordinatorIncidentDetail(record)}
-                                      </p>
-                                    ) : (
-                                      <p className="truncate text-sm text-slate-700">
-                                        {getStatusDetail(record)}
-                                      </p>
-                                    )}
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {(getStatusDetailItems(record).length > 0
+                                        ? getStatusDetailItems(record)
+                                        : [
+                                            isCoordinatorManagerView
+                                              ? getCoordinatorIncidentDetail(
+                                                  record,
+                                                )
+                                              : getStatusDetail(record),
+                                          ]
+                                      ).map((item) => (
+                                        <span
+                                          key={`${record.id}-${item}`}
+                                          className={`inline-flex rounded-full border bg-white px-2.5 py-1 text-[11px] font-semibold leading-5 shadow-sm ${getStatusDetailItemOnWhiteClass(record)}`}
+                                        >
+                                          {item}
+                                        </span>
+                                      ))}
+                                    </div>
                                   </div>
                                   <div className="flex md:justify-center">
                                     <span
@@ -7536,10 +7754,10 @@ const filteredRecords = useMemo(() => {
                         Revisión
                       </p>
                       <h3 className="text-base font-semibold text-slate-900">
-                        Solicitudes de teletrabajo y permisos
+                        Solicitudes de permisos
                       </h3>
                       <p className="text-sm text-slate-600">
-                        Flujo por etapas: trabajador, coordinador y administración.
+                        Gestiona las solicitudes de teletrabajo y permisos enviadas
                       </p>
                     </div>
 
@@ -7547,10 +7765,10 @@ const filteredRecords = useMemo(() => {
                       
                       {/* --- BLOQUE DE FILTROS HORIZONTALES PREMIUM --- */}
                       <div className="rounded-2xl border border-slate-100 bg-slate-50/50 p-4 shadow-sm backdrop-blur-sm">
-                        <div className="flex flex-wrap items-end gap-4">
+                        <div className="flex flex-col items-stretch gap-4 sm:flex-row sm:flex-wrap sm:items-end">
 
                           {/* 1. Trabajador (Se expande fluidamente) */}
-                          <div className="min-w-[240px] flex-1">
+                          <div className="w-full min-w-0 flex-1 sm:min-w-[240px]">
                             <label htmlFor="exclUserFilterManager" className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
                               Trabajador
                             </label>
@@ -7562,7 +7780,7 @@ const filteredRecords = useMemo(() => {
                                 value={requestsUserSearch}
                                 placeholder="Todos los trabajadores..."
                                 autoComplete="off"
-                                className="h-10 w-full rounded-xl border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
+                                className="h-10 w-full min-w-0 rounded-xl border-slate-200 bg-white pl-9 pr-3 text-sm shadow-sm transition-all focus:border-slate-400 focus:ring-0"
                                 onChange={(event) => {
                                   const nextValue = event.target.value;
                                   setRequestsUserSearch(nextValue);
@@ -7586,7 +7804,7 @@ const filteredRecords = useMemo(() => {
                           </div>
 
                           {/* 2. Fecha Desde */}
-                          <div className="w-[140px] shrink-0">
+                          <div className="w-full shrink-0 sm:w-[140px]">
                             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
                               Desde
                             </label>
@@ -7599,7 +7817,7 @@ const filteredRecords = useMemo(() => {
                           </div>
 
                           {/* 3. Fecha Hasta */}
-                          <div className="w-[140px] shrink-0">
+                          <div className="w-full shrink-0 sm:w-[140px]">
                             <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-slate-500">
                               Hasta
                             </label>
@@ -7612,7 +7830,7 @@ const filteredRecords = useMemo(() => {
                           </div>
 
                           {/* 4. Estado */}
-                          <div className="w-[200px] shrink-0">
+                          <div className="w-full shrink-0 sm:w-[200px]">
                             <Select
                               id="exclStatusFilterManager"
                               label="Estado"
@@ -7620,17 +7838,17 @@ const filteredRecords = useMemo(() => {
                               onChange={(e) => setRequestsStatusFilter(e.target.value)}
                               options={[
                                 { value: "", label: "Todos" },
-                                { value: "PENDING_COORDINATOR", label: "Pendiente Coordinador" },
-                                { value: "PENDING_ADMIN", label: "Pendiente Admin" },
+                                { value: "PENDING_COORDINATOR", label: "Pendiente administración" },
+                                { value: "PENDING_ADMIN", label: "Pendiente administración" },
                               ]}
                             />
                           </div>
 
                           {/* 5. Botón Limpiar */}
-                          <div className="ml-auto shrink-0">
+                          <div className="w-full shrink-0 sm:ml-auto sm:w-auto">
                             <button
                               type="button"
-                              className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95"
+                              className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-slate-200 bg-slate-100 px-4 py-2 text-sm font-medium text-slate-700 shadow-sm transition-all hover:bg-slate-200 hover:text-slate-900 active:scale-95 sm:w-auto"
                               onClick={clearRequestFilters}
                             >
                               <i className="ti ti-brush" style={{ fontSize: "16px" }} aria-hidden="true"></i>
@@ -7698,18 +7916,32 @@ const filteredRecords = useMemo(() => {
                                       </div>
                                     </td>
                                     
-                                    <td className="py-4 pr-4 align-middle text-slate-700">
-                                      <span
-                                        className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
-                                          request.kind === "REMOTE_WORK"
-                                            ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
-                                            : "bg-cyan-50 text-cyan-700 border border-cyan-100"
-                                        }`}
-                                      >
-                                        {request.kind === "REMOTE_WORK"
-                                          ? "Teletrabajo"
-                                          : "Permiso"}
-                                      </span>
+                                    <td className="py-4 pr-4 align-middle">
+                                      <div className="flex flex-col gap-1.5">
+                                        <span
+                                          className={`inline-flex w-fit rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                                            request.kind === "REMOTE_WORK"
+                                              ? "bg-indigo-50 text-indigo-700 border border-indigo-100"
+                                              : "bg-cyan-50 text-cyan-700 border border-cyan-100"
+                                          }`}
+                                        >
+                                          {request.kind === "REMOTE_WORK"
+                                            ? "Teletrabajo"
+                                            : "Permiso"}
+                                        </span>
+
+                                        {request.kind === "PERMISSION" &&
+                                        request.legalPermissionType ? (
+                                          <span className="inline-flex w-fit rounded-full border border-violet-100 bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700">
+                                            {LEGAL_PERMISSION_TYPE_OPTIONS.find(
+                                              (option) =>
+                                                option.value ===
+                                                request.legalPermissionType,
+                                            )?.label ??
+                                              request.legalPermissionType}
+                                          </span>
+                                        ) : null}
+                                      </div>
                                     </td>
                                     
                                     <td className="py-4 pr-4 align-middle font-medium leading-6 text-slate-600">
@@ -7718,7 +7950,7 @@ const filteredRecords = useMemo(() => {
                                     
                                     <td className="py-4 pr-4 align-middle">
                                       <span
-                                        className={`inline-flex rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider ${EXCLUSION_REQUEST_STATUS_CLASSES[request.status]}`}
+                                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${EXCLUSION_REQUEST_STATUS_CLASSES[request.status]}`}
                                       >
                                         {
                                           EXCLUSION_REQUEST_STATUS_LABELS[
@@ -7749,10 +7981,11 @@ const filteredRecords = useMemo(() => {
                                     </td>
                                     
                                     <td className="py-4 pr-4 align-middle text-right">
-                                      <div className="flex justify-end gap-2">
-                                        <Button
-                                          variant="secondary"
-                                          className="rounded-full border-rose-200 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-rose-700 shadow-none hover:bg-rose-50"
+                                      <div className="flex justify-end gap-2" id= "per">
+                                        {/* BOTÓN: Rechazar (Fondo blanco, texto oscuro súper visible, X roja y borde rosa) */}
+                                        <button
+                                          type="button"
+                                          className="group inline-flex items-center justify-center gap-1.5 rounded-full border border-rose-200 bg-white px-3.5 py-1.5 text-[12px] font-semibold text-slate-900 shadow-none transition-all duration-200 hover:bg-rose-50 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
                                           onClick={() =>
                                             reviewExclusionRequest(
                                               request,
@@ -7765,11 +7998,23 @@ const filteredRecords = useMemo(() => {
                                               !isFunctionalAdmin)
                                           }
                                         >
-                                          Rechazar
-                                        </Button>
+                                          <svg
+                                            className="h-3.5 w-3.5 text-red-500 transition-transform duration-300 group-hover:scale-120 group-hover:-rotate-12"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            strokeWidth={2.5}
+                                            aria-hidden="true"
+                                          >
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+                                          </svg>
+                                          <span className="text-slate-900">Rechazar</span>
+                                        </button>
                                         
-                                        <Button
-                                          className="rounded-full bg-emerald-600 px-3.5 py-1.5 text-[12px] font-semibold text-white hover:bg-emerald-700"
+                                        {/* BOTÓN: Aprobar (Fondo VERDE esmeralda, texto e icono en blanco puro) */}
+                                        <button
+                                          type="button"
+                                          className="group inline-flex items-center justify-center gap-1.5 rounded-full bg-emerald-600 px-3.5 py-1.5 text-[12px] font-semibold text-white shadow-none transition-all duration-200 hover:bg-emerald-700 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
                                           onClick={() =>
                                             reviewExclusionRequest(
                                               request,
@@ -7782,8 +8027,18 @@ const filteredRecords = useMemo(() => {
                                               !isFunctionalAdmin)
                                           }
                                         >
-                                          Aprobar
-                                        </Button>
+                                          <svg
+                                            className="h-3.5 w-3.5 text-white transition-transform duration-300 group-hover:scale-120"
+                                            fill="none"
+                                            viewBox="0 0 24 24"
+                                            stroke="currentColor"
+                                            strokeWidth={2.5}
+                                            aria-hidden="true"
+                                          >
+                                            <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+                                          </svg>
+                                          <span>Aprobar</span>
+                                        </button>
                                       </div>
                                     </td>
                                   </tr>
@@ -7925,14 +8180,18 @@ const filteredRecords = useMemo(() => {
                               <th className="py-2.5 pr-4 font-semibold">
                                 Validación
                               </th>
-                              <th className="py-2.5 pr-4 font-semibold">
-                                Detalle
+                              <th className="py-2.5 pr-5 text-center font-semibold">
+                                Info
                               </th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
                             {managerVisibleRecords.map((record) => (
-                              <tr key={`manager-record-${record.id}`}>
+                              <tr
+                                key={`manager-record-${record.id}`}
+                                className="cursor-pointer transition hover:bg-orange-50/40"
+                                onClick={() => setSelectedRecordForDetail(record)}
+                              >
                                 <td className="py-4 pr-4 pl-5 text-slate-700">
                                   {getDisplayUserName(
                                     record.userId,
@@ -7972,49 +8231,19 @@ const filteredRecords = useMemo(() => {
                                     {getDisplayTrustLabel(record)}
                                   </span>
                                 </td>
-                                <td className="py-4 pr-4">
-                                  <div className="space-y-4">
-  {isCoordinatorManagerView ? (
-    <p>{getCoordinatorIncidentDetail(record)}</p>
-  ) : shouldRenderStatusDetailItems(record) ? (
-    <div className="flex flex-wrap gap-2">
-      {getStatusDetailItems(record).map((item) => (
-        <span
-          key={`${record.id}-table-detail-${item}`}
-          className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-4 ${getStatusDetailItemClass(record)}`}
-        >
-          {item}
-        </span>
-      ))}
-    </div>
-  ) : (
-    <div className="flex flex-wrap gap-2">
-      <span
-        className={`inline-flex rounded-full border px-3 py-1.5 text-[11px] font-semibold leading-4 ${
-          record.status === "OPEN"
-            ? "border-amber-500 bg-transparent text-amber-700"
-            : "border-emerald-200 bg-emerald-50 text-emerald-700"
-        }`}
-      >
-        {getStatusDetail(record)}
-      </span>
-    </div>
-  )}
-
-  {/* BOTÓN SUAVE, FINO Y ESTILIZADO */}
-  <button
-    type="button"
-    className={DETAIL_ACTION_BUTTON_CLASS}
-    onClick={() => setSelectedRecordForDetail(record)}
-  >
-    <span>
-      {isFunctionalAdmin && getDisplayTrustLevel(record) === "REVIEW"
-        ? "Abrir y validar"
-        : "Abrir detalle"}
-    </span>
-    <i className={DETAIL_ACTION_ICON_CLASS} aria-hidden="true" />
-  </button>
-</div>
+                                <td className="py-4 pr-5 text-center">
+                                  <button
+                                    type="button"
+                                    className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-orange-200 hover:bg-orange-50 hover:text-orange-600 active:scale-95"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      setSelectedRecordForDetail(record);
+                                    }}
+                                    aria-label="Abrir detalle del fichaje"
+                                    title="Abrir detalle"
+                                  >
+                                    <i className="ti ti-info-circle text-[18px]" aria-hidden="true" />
+                                  </button>
                                 </td>
                               </tr>
                             ))}
@@ -8029,91 +8258,205 @@ const filteredRecords = useMemo(() => {
           ) : null}
         </div>
       </section>
-      {openWorkdayWarning ? (
-        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/45 px-4">
-          <div className="relative w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl">
-            <button
-              type="button"
-              className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold leading-none text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
-              onClick={postponeOpenWorkdayWarning}
-              aria-label="Recordármelo después"
-            >
-              ×
-            </button>
-
-            <div className="flex items-start gap-4 pr-10">
-              <div
-                className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-sm ring-1 ${
-                  openWorkdayWarning.level === "critical"
-                    ? "bg-rose-50 text-rose-600 ring-rose-100"
-                    : "bg-amber-50 text-amber-600 ring-amber-100"
-                }`}
-              >
-                <i
-                  className={`ti ${
-                    openWorkdayWarning.level === "critical"
-                      ? "ti-alert-triangle"
-                      : "ti-clock-exclamation"
-                  } text-[24px]`}
-                  aria-hidden="true"
-                />
+      {tabletClockAction ? (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/45 px-4 backdrop-blur-[2px]">
+          <form
+            className="w-full max-w-sm rounded-[28px] border border-slate-200 bg-white p-6 text-left shadow-2xl"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void confirmTabletClockAction();
+            }}
+          >
+            <div className="flex items-start gap-4">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-50 text-sky-700 ring-1 ring-sky-100">
+                <i className="ti ti-device-tablet-code text-[24px]" aria-hidden="true" />
               </div>
-              <div className="min-w-0">
-                <p
-                  className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${
-                    openWorkdayWarning.level === "critical"
-                      ? "text-rose-600"
-                      : "text-amber-600"
-                  }`}
-                >
-                  Jornada abierta
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-sky-700">
+                  Fichaje desde tablet
                 </p>
                 <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
-                  {openWorkdayWarning.level === "critical"
-                    ? "Tu jornada lleva abierta demasiado tiempo"
-                    : "Tu jornada sigue abierta"}
+                  Introduce el código de fichaje
                 </h3>
-                <p className="mt-2 text-sm leading-6 text-slate-600">
-                  {openWorkdayWarning.level === "critical"
-                    ? "Esta jornada lleva abierta desde hace más de 24 horas. Revisa si olvidaste fichar la salida."
-                    : "Tu jornada lleva abierta más de 8 horas y 15 minutos. Si ya has terminado, puedes fichar la salida ahora."}
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  Este paso confirma que el fichaje se realiza desde la tablet
+                  autorizada.
                 </p>
               </div>
             </div>
 
-            <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
-              <p>
-                <span className="font-semibold text-slate-900">Entrada:</span>{" "}
-                {formatShortDate(openWorkdayWarning.record.workDate)} ·{" "}
-                {formatTimeOnly(openWorkdayWarning.record.checkInAt)}
-              </p>
-              <p className="mt-1 text-xs text-slate-500">
-                Tiempo abierta:{" "}
-                <span className="font-semibold text-slate-700">
-                  {formatHoursFromMinutes(openWorkdayWarning.minutesOpen)}
-                </span>
-              </p>
-            </div>
+            <label
+              htmlFor="tablet-clock-code"
+              className="mt-5 block text-xs font-semibold uppercase tracking-[0.14em] text-slate-500"
+            >
+              Código
+            </label>
+            <Input
+              id="tablet-clock-code"
+              type="password"
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              value={tabletClockCode}
+              onChange={(event) => {
+                setTabletClockCode(event.target.value);
+                setTabletClockError(null);
+              }}
+              placeholder="Código de tablet"
+              className="mt-2 h-12 w-full rounded-2xl border-slate-200 bg-slate-50 px-4 text-center text-lg font-semibold text-slate-900 shadow-inner placeholder:tracking-normal focus:border-sky-300 focus:bg-white focus:ring-2 focus:ring-sky-100"
+              autoFocus
+            />
 
-            <div className="mt-5 flex flex-wrap justify-end gap-2">
+            {tabletClockError ? (
+              <p className="mt-3 rounded-2xl border border-rose-100 bg-rose-50 px-4 py-3 text-sm text-rose-700">
+                {tabletClockError}
+              </p>
+            ) : null}
+
+            <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
               <Button
+                type="button"
                 variant="secondary"
                 className={POPUP_NEUTRAL_BUTTON_CLASS}
-                onClick={postponeOpenWorkdayWarning}
+                onClick={() => {
+                  setTabletClockAction(null);
+                  setTabletClockCode("");
+                  setTabletClockError(null);
+                }}
                 disabled={submitting}
               >
-                Recordármelo después
+                Cancelar
               </Button>
               <Button
+                type="submit"
                 className={POPUP_PRIMARY_BUTTON_CLASS}
-                onClick={closeOpenWorkdayFromWarning}
                 disabled={submitting}
               >
-                Fichar salida
+                Continuar
               </Button>
             </div>
-          </div>
+          </form>
         </div>
+      ) : null}
+      {openWorkdayWarning ? (
+        <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/45 px-4">
+  <div className="relative w-full max-w-lg rounded-[28px] border border-slate-200 bg-white p-6 shadow-2xl">
+    <button
+      type="button"
+      className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-slate-200 bg-white text-lg font-semibold leading-none text-slate-500 shadow-sm transition hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900"
+      onClick={postponeOpenWorkdayWarning}
+      aria-label="Recordármelo después"
+    >
+      ×
+    </button>
+
+    <div className="flex items-start gap-4 pr-10">
+      <div
+        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl shadow-sm ring-1 ${
+          openWorkdayWarning.level === "critical"
+            ? "bg-rose-50 text-rose-600 ring-rose-100"
+            : "bg-amber-50 text-amber-600 ring-amber-100"
+        }`}
+      >
+        <i
+          className={`ti ${
+            openWorkdayWarning.level === "critical"
+              ? "ti-alert-triangle"
+              : "ti-clock-exclamation"
+          } text-[24px]`}
+          aria-hidden="true"
+        />
+      </div>
+      <div className="min-w-0">
+        <p
+          className={`text-[11px] font-semibold uppercase tracking-[0.16em] ${
+            openWorkdayWarning.level === "critical"
+              ? "text-rose-600"
+              : "text-amber-600"
+          }`}
+        >
+          Jornada abierta
+        </p>
+        <h3 className="mt-1 text-lg font-semibold tracking-tight text-slate-900">
+          {openWorkdayWarning.level === "critical"
+            ? "Tu jornada lleva abierta demasiado tiempo"
+            : "Tu jornada sigue abierta"}
+        </h3>
+        <p className="mt-2 text-sm leading-6 text-slate-600">
+          {openWorkdayWarning.level === "critical"
+            ? "Esta jornada lleva abierta desde hace más de 24 horas. Revisa si olvidaste fichar la salida."
+            : "Tu jornada lleva abierta más de 8 horas y 15 minutos. Si ya has terminado, puedes fichar la salida ahora."}
+        </p>
+      </div>
+    </div>
+
+    <div className="mt-5 rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 text-sm text-slate-700">
+      <p>
+        <span className="font-semibold text-slate-900">Entrada:</span>{" "}
+        {formatShortDate(openWorkdayWarning.record.workDate)} ·{" "}
+        {formatTimeOnly(openWorkdayWarning.record.checkInAt)}
+      </p>
+      <p className="mt-1 text-xs text-slate-500">
+        Tiempo abierta:{" "}
+        <span className="font-semibold text-slate-700">
+          {formatHoursFromMinutes(openWorkdayWarning.minutesOpen)}
+        </span>
+      </p>
+    </div>
+
+    {/* BLOQUE DE BOTONES RENOVADO */}
+    <div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+      
+      {/* Botón: Recordármelo después (Neutro) */}
+      <button
+        type="button"
+        className="group flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-5 text-sm font-semibold text-slate-600 shadow-sm transition-all duration-300 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 active:scale-95 whitespace-nowrap disabled:opacity-50"
+        onClick={postponeOpenWorkdayWarning}
+        disabled={submitting}
+      >
+        <span>Recordármelo después</span>
+      </button>
+      
+      {/* Botón: Fichar salida (Dinámico: Rose / Amber) */}
+      <button
+        type="button"
+        className={`group flex h-10 items-center justify-center gap-1.5 rounded-xl border bg-white px-5 text-sm font-semibold shadow-sm transition-all duration-300 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap ${
+          openWorkdayWarning.level === "critical"
+            ? "border-rose-200 text-rose-700 hover:border-rose-300 hover:bg-rose-50 hover:text-rose-800"
+            : "border-amber-200 text-amber-700 hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800"
+        }`}
+        onClick={closeOpenWorkdayFromWarning}
+        disabled={submitting}
+      >
+        {submitting ? (
+          <>
+            <svg className={`h-4 w-4 animate-spin ${openWorkdayWarning.level === "critical" ? "text-rose-600" : "text-amber-600"}`} fill="none" viewBox="0 0 24 24" aria-hidden="true">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+            <span>Cerrando...</span>
+          </>
+        ) : (
+          <>
+            <svg
+              className={`h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5 ${
+                openWorkdayWarning.level === "critical" ? "text-rose-600" : "text-amber-600"
+              }`}
+              fill="none"
+              viewBox="0 0 24 24"
+              stroke="currentColor"
+              strokeWidth={2}
+              aria-hidden="true"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
+            </svg>
+            <span>Fichar salida</span>
+          </>
+        )}
+      </button>
+      
+    </div>
+  </div>
+</div>
       ) : null}
       {adminClosedWorkdayNotice && !openWorkdayWarning ? (
         <div className="fixed inset-0 z-[65] flex items-center justify-center bg-slate-950/45 px-4">
@@ -8178,13 +8521,26 @@ const filteredRecords = useMemo(() => {
   </Button>
 
   {/* BOTÓN VER DETALLE */}
-  <Button
-    className={DETAIL_ACTION_BUTTON_CLASS}
-    onClick={openAdminClosedWorkdayDetail}
+<Button
+  variant="secondary"
+  className="group flex items-center justify-center gap-1.5 bg-white border border-sky-200 text-sm font-medium !text-sky-700 hover:bg-sky-50 hover:!text-sky-900 rounded-xl px-4 py-2 shadow-sm transition-all duration-300"
+  onClick={openAdminClosedWorkdayDetail}
+>
+  <span>Ver detalle</span>
+  <svg
+    className="h-3.5 w-3.5 text-sky-600 transition-transform duration-300 group-hover:scale-110 group-hover:-translate-y-0.5 group-hover:text-sky-800"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    strokeWidth={2}
+    aria-hidden="true"
   >
-    <span>Ver detalle</span>
-    <i className={DETAIL_ACTION_ICON_CLASS} aria-hidden="true" />
-  </Button>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+  </svg>
+</Button>
+
+
+
 </div>
           </div>
         </div>
@@ -8324,7 +8680,7 @@ const filteredRecords = useMemo(() => {
                           {getDisplayUserName(record.userId, record.userName)}
                         </p>
                         <span
-                          className={`${SOFT_STATUS_CHIP_CLASS} ${TRUST_LEVEL_CLASSES[getDisplayTrustLevel(record)]}`}
+                          className={`${SOFT_STATUS_CHIP_CLASS} border-sky-200 bg-sky-50 text-sky-700`}
                         >
                           {getDisplayTrustLabel(record)}
                         </span>
@@ -8343,7 +8699,7 @@ const filteredRecords = useMemo(() => {
                           .map((item) => (
                             <span
                               key={`${record.id}-calendar-hour-detail-${item}`}
-                              className="inline-flex rounded-full border border-orange-200 bg-white px-3 py-1.5 text-[11px] font-semibold leading-4 text-orange-700 shadow-sm"
+                              className="inline-flex rounded-full border border-sky-200 bg-white px-3 py-1.5 text-[11px] font-semibold leading-4 text-sky-700 shadow-sm"
                             >
                               {item}
                             </span>
@@ -8352,14 +8708,15 @@ const filteredRecords = useMemo(() => {
                     </div>
                     <button
                       type="button"
-                      className={DETAIL_ACTION_BUTTON_CLASS}
+                      className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-sky-200 hover:bg-sky-50 hover:text-sky-700"
                       onClick={() => {
                         setCoordinatorCalendarDetailDate(null);
                         setSelectedRecordForDetail(record);
                       }}
+                      aria-label="Abrir detalle"
+                      title="Abrir detalle"
                     >
-                      <span>Abrir detalle</span>
-                      <i className={DETAIL_ACTION_ICON_CLASS} aria-hidden="true" />
+                      <i className="ti ti-info-circle text-[18px]" aria-hidden="true" />
                     </button>
                   </div>
                 </div>
@@ -8841,45 +9198,70 @@ const filteredRecords = useMemo(() => {
         </p>
       ) : (
         <div className="space-y-2">
-          {modalManagerIncidentRecords.map((record) => (
-            <div
-              key={`manager-incident-${record.id}`}
-              className={`rounded-xl border px-4 py-3 shadow-sm transition-all ${
-                record.status === "INCOMPLETE" 
-                  ? "border-slate-200 bg-white hover:border-slate-300" 
-                  : "border-sky-100 bg-white hover:border-sky-200"
-              }`}
-            >
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-sm font-semibold text-slate-900">
-                  {getDisplayUserName(record.userId, record.userName)}
-                </span>
+          {modalManagerIncidentRecords.map((record) => {
+            // 1. Extraemos el texto de la incidencia
+            const detailText = isCoordinatorManagerView
+              ? getCoordinatorIncidentDetail(record)
+              : getStatusDetail(record);
+
+            // 2. Lo troceamos limpiamente
+            const incidenciasIndividuales: string[] = detailText
+              ? detailText.split(/[.,]/).map((t: string) => t.trim()).filter(Boolean)
+              : [];
+
+            return (
+              <div
+                key={`manager-incident-${record.id}`}
+                className={`rounded-xl border px-4 py-3 shadow-sm transition-all ${
+                  record.status === "INCOMPLETE" 
+                    ? "border-slate-200 bg-white hover:border-slate-300" 
+                    : "border-sky-100 bg-white hover:border-sky-200"
+                }`}
+              >
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-900">
+                    {getDisplayUserName(record.userId, record.userName)}
+                  </span>
+                  
+                  {/* ETIQUETA: Estado */}
+                  <span
+                    className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
+                      record.status === "INCOMPLETE" 
+                        ? "border-slate-200 text-slate-600 bg-slate-50/50" 
+                        : "border-sky-200 text-sky-700 bg-sky-50/50"
+                    }`}
+                  >
+                    <span className={`h-1.5 w-1.5 rounded-full ${record.status === "INCOMPLETE" ? "bg-slate-400" : "bg-sky-500"}`} />
+                    {record.status === "INCOMPLETE" 
+                      ? STATUS_LABELS[getDisplayRecordStatus(record)] 
+                      : "Revisar"}
+                  </span>
+                </div>
                 
-                {/* ETIQUETA CORREGIDA: Fuerza el texto "Revisar" para los incidentes */}
-                <span
-                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${
-                    record.status === "INCOMPLETE" 
-                      ? "border-slate-200 text-slate-600 bg-slate-50/50" 
-                      : "border-sky-200 text-sky-700 bg-sky-50/50"
-                  }`}
-                >
-                  <span className={`h-1.5 w-1.5 rounded-full ${record.status === "INCOMPLETE" ? "bg-slate-400" : "bg-sky-500"}`} />
-                  {record.status === "INCOMPLETE" 
-                    ? STATUS_LABELS[getDisplayRecordStatus(record)] 
-                    : "Revisar"}
-                </span>
+                <p className="mt-1.5 text-sm text-slate-500">
+                  {getRecordLine(record)}
+                </p>
+
+                {/* CONTENEDOR DE BADGES TOTALMENTE REDONDEADOS (rounded-full) */}
+                {incidenciasIndividuales.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {incidenciasIndividuales.map((textoBadge: string, idx: number) => (
+                      <span
+                        key={idx}
+                        className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${
+                          record.status === "INCOMPLETE"
+                            ? "border-slate-200 text-slate-600 bg-slate-50"
+                            : "border-sky-200 text-sky-700 bg-sky-50"
+                        }`}
+                      >
+                        {textoBadge}
+                      </span>
+                    ))}
+                  </div>
+                )}
               </div>
-              
-              <p className="mt-1.5 text-sm text-slate-500">
-                {getRecordLine(record)}
-              </p>
-              <p className="mt-0.5 text-sm font-medium text-slate-600">
-                {isCoordinatorManagerView
-                  ? getCoordinatorIncidentDetail(record)
-                  : getStatusDetail(record)}
-              </p>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>
@@ -8905,7 +9287,7 @@ const filteredRecords = useMemo(() => {
       ) : null}
       {selectedDetailDate && selectedDetailRecords.length > 0 ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
-<div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
+<div className="w-full max-w-4xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
   {/* Cabecera unificada */}
   <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-100 px-5 py-4">
     <p className="text-sm font-semibold text-slate-900 tracking-tight">
@@ -8935,7 +9317,7 @@ const filteredRecords = useMemo(() => {
   </div>
 
   {/* Contenido del Detalle */}
-  <div className="max-h-[65vh] space-y-4 overflow-y-auto px-5 py-4">
+  <div className="max-h-[78vh] space-y-4 overflow-y-auto px-5 py-4">
     {selectedDetailRecords.map((record) => (
       <div key={`detail-${record.id}`} className="p-0.5">
         {renderRecordDetailContent(record)}
@@ -9450,9 +9832,9 @@ const filteredRecords = useMemo(() => {
         </div>
       ) : null}
       {isWorkerMode && showRequestModal ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 px-4">
-          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
-            <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-200 pb-4">
+        <div className="fixed inset-0 z-40 flex items-start justify-center overflow-y-auto bg-slate-950/45 px-2 py-4 sm:items-center sm:px-4">
+          <div className="w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl sm:p-5">
+            <div className="border-b border-slate-200 pb-4">
               <div className="space-y-1">
                 <h3 className="text-base font-semibold text-slate-900">
                   Solicitar fichaje anterior
@@ -9461,13 +9843,6 @@ const filteredRecords = useMemo(() => {
                   Pide una entrada o salida de una fecha anterior.
                 </p>
               </div>
-              <Button
-                variant="secondary"
-                className={POPUP_NEUTRAL_BUTTON_CLASS}
-                onClick={() => setShowRequestModal(false)}
-              >
-                Cerrar
-              </Button>
             </div>
 
             <div className="mt-4 space-y-4">
@@ -9514,25 +9889,249 @@ const filteredRecords = useMemo(() => {
                 </p>
               </div>
 
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="secondary"
-                  className={POPUP_NEUTRAL_BUTTON_CLASS}
-                  onClick={() => setShowRequestModal(false)}
-                >
-                  Cancelar
-                </Button>
-                <Button
-                  className={POPUP_PRIMARY_BUTTON_CLASS}
-                  disabled={requestSubmitting}
-                  onClick={submitAdjustmentRequest}
-                >
-                  Enviar solicitud
-                </Button>
-              </div>
+              {/* Contenedor limpio, fondo blanco y sin márgenes que rompan el diseño */}
+<div className="mt-6 flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+  
+  {/* Botón Cancelar */}
+  <button
+    type="button"
+    className="group flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition-all duration-300 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 active:scale-95 whitespace-nowrap"
+    onClick={() => setShowRequestModal(false)}
+  >
+    <svg
+      className="h-4 w-4 text-slate-400 transition-transform duration-300 group-hover:scale-110"
+      fill="none"
+      viewBox="0 0 24 24"
+      stroke="currentColor"
+      strokeWidth={2}
+      aria-hidden="true"
+    >
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
+    </svg>
+    <span>Cancelar</span>
+  </button>
+  
+  {/* Botón Enviar Solicitud */}
+  <button
+    type="button"
+    className="group flex h-10 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-white px-4 text-sm font-semibold text-sky-700 shadow-sm transition-all duration-300 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed whitespace-nowrap"
+    disabled={requestSubmitting}
+    onClick={submitAdjustmentRequest}
+  >
+    {requestSubmitting ? (
+      <>
+        <svg className="h-4 w-4 animate-spin text-sky-600" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+        </svg>
+        <span>Enviando...</span>
+      </>
+    ) : (
+      <>
+        <svg
+          className="h-4 w-4 text-sky-600 transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-12"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          strokeWidth={2}
+          aria-hidden="true"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" d="M6 12 3.269 3.125A59.77 59.77 0 0 1 21.485 12 59.768 59.768 0 0 1 3.27 20.875L6 12Zm0 0h7.5" />
+        </svg>
+        <span>Enviar solicitud</span>
+      </>
+    )}
+  </button>
+  
+</div>
             </div>
           </div>
         </div>
+      ) : null}
+      {isWorkerMode && showExclusionRequestModal ? (
+        <Modal
+          open={showExclusionRequestModal}
+          onClose={resetExclusionRequestModal}
+          title={
+            exclusionRequestType === "PERMISSION"
+              ? "Solicitar permiso"
+              : "Solicitar teletrabajo"
+          }
+          panelClassName="max-w-2xl"
+        >
+          <div className="space-y-4 text-sm text-slate-700">
+            {exclusionRequestType === "PERMISSION" ? (
+              <div className="space-y-4">
+                <Select
+                  label="Tipo de permiso"
+                  value={permissionLegalType}
+                  onChange={(event) =>
+                    setPermissionLegalType(
+                      event.target.value as LegalPermissionType,
+                    )
+                  }
+                  options={LEGAL_PERMISSION_TYPE_OPTIONS.map((option) => ({
+                    value: option.value,
+                    label: option.label,
+                  }))}
+                />
+                <div className="rounded-2xl border border-sky-100 bg-sky-50/70 px-4 py-3">
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-sky-700">
+                    Cálculo orientativo
+                  </p>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-700">
+                    {
+                      LEGAL_PERMISSION_TYPE_OPTIONS.find(
+                        (option) => option.value === permissionLegalType,
+                      )?.rule
+                    }
+                  </p>
+                </div>
+              </div>
+            ) : null}
+
+            <Input
+              label="Fecha solicitada"
+              type="date"
+              value={exclusionRequestDate}
+              onChange={(event) => setExclusionRequestDate(event.target.value)}
+            />
+
+            {exclusionRequestType === "PERMISSION" ? (
+              <div className="space-y-2">
+                <label
+                  className="block text-sm font-medium text-slate-700"
+                  htmlFor="permissionAttachmentFile"
+                >
+                  Justificantes adjuntos
+                </label>
+                <label
+                  htmlFor="permissionAttachmentFile"
+                  className="group flex cursor-pointer flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-sky-200 bg-sky-50/50 px-4 py-5 text-center transition hover:border-sky-300 hover:bg-sky-50"
+                >
+                  <i
+                    className="ti ti-upload text-2xl text-sky-600 transition-transform group-hover:-translate-y-0.5"
+                    aria-hidden="true"
+                  />
+                  <span className="text-sm font-semibold text-slate-800">
+                    {permissionAttachmentFiles.length > 0
+                      ? `${permissionAttachmentFiles.length} archivo${
+                          permissionAttachmentFiles.length === 1 ? "" : "s"
+                        } seleccionado${
+                          permissionAttachmentFiles.length === 1 ? "" : "s"
+                        }`
+                      : "Adjuntar fotos o archivos"}
+                  </span>
+                  <span className="text-xs leading-relaxed text-slate-500">
+                    Hasta 3 archivos. JPG, PNG, WEBP o PDF. Máximo 5 MB por archivo.
+                  </span>
+                </label>
+                <input
+                  id="permissionAttachmentFile"
+                  type="file"
+                  className="sr-only"
+                  accept="image/jpeg,image/png,image/webp,application/pdf"
+                  multiple
+                  onChange={(event) => {
+                    const selectedFiles = Array.from(event.target.files ?? []);
+                    setPermissionAttachmentFiles((current) => {
+                      const mergedFiles = [...current];
+                      selectedFiles.forEach((file) => {
+                        const alreadySelected = mergedFiles.some(
+                          (entry) =>
+                            entry.name === file.name &&
+                            entry.size === file.size &&
+                            entry.lastModified === file.lastModified,
+                        );
+                        if (!alreadySelected && mergedFiles.length < 3) {
+                          mergedFiles.push(file);
+                        }
+                      });
+                      return mergedFiles;
+                    });
+                    event.target.value = "";
+                  }}
+                />
+                {permissionAttachmentFiles.length > 0 ? (
+                  <div className="space-y-2 rounded-2xl border border-slate-200 bg-white p-3">
+                    {permissionAttachmentFiles.map((file, index) => (
+                      <div
+                        key={`${file.name}-${file.lastModified}-${index}`}
+                        className="flex items-center justify-between gap-3 rounded-xl bg-slate-50 px-3 py-2 text-xs text-slate-600"
+                      >
+                        <span className="min-w-0 truncate font-medium">
+                          {file.name}
+                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 font-semibold text-slate-400 transition hover:text-rose-600"
+                          onClick={() =>
+                            setPermissionAttachmentFiles((current) =>
+                              current.filter((_, fileIndex) => fileIndex !== index),
+                            )
+                          }
+                        >
+                          Quitar
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            <div className="space-y-2">
+              <label
+                className="block text-sm font-medium text-slate-700"
+                htmlFor="exclusionRequestReason"
+              >
+                Motivo *
+              </label>
+              <textarea
+                id="exclusionRequestReason"
+                className="min-h-[96px] w-full rounded-xl border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition focus:border-sky-300 focus:ring-2 focus:ring-sky-100"
+                required
+                value={exclusionRequestReason}
+                onChange={(event) =>
+                  setExclusionRequestReason(event.target.value)
+                }
+              />
+              <p className="text-xs leading-relaxed text-slate-500">
+                {exclusionRequestType === "PERMISSION"
+                  ? "Indica el contexto del permiso. Si tienes justificante, adjúntalo antes de enviarlo."
+                  : "Indica el motivo de la solicitud."}
+              </p>
+            </div>
+
+            <div className="flex items-center justify-end gap-3 border-t border-slate-100 pt-4">
+              <button
+                type="button"
+                className="group flex h-10 items-center justify-center gap-1.5 rounded-xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-600 shadow-sm transition-all duration-300 hover:border-slate-300 hover:bg-slate-50 hover:text-slate-900 active:scale-95 disabled:opacity-50"
+                disabled={exclusionRequestSubmitting}
+                onClick={resetExclusionRequestModal}
+              >
+                <i className="ti ti-x text-[15px]" aria-hidden="true" />
+                <span>Cancelar</span>
+              </button>
+              <button
+                type="button"
+                className="group flex h-10 items-center justify-center gap-1.5 rounded-xl border border-sky-200 bg-white px-4 text-sm font-semibold text-sky-700 shadow-sm transition-all duration-300 hover:border-sky-300 hover:bg-sky-50 hover:text-sky-800 active:scale-95 disabled:cursor-not-allowed disabled:opacity-50"
+                disabled={exclusionRequestSubmitting}
+                onClick={submitExclusionRequest}
+              >
+                <i
+                  className="ti ti-send-2 text-[15px] transition-transform duration-300 group-hover:-rotate-12"
+                  aria-hidden="true"
+                />
+                <span>
+                  {exclusionRequestSubmitting
+                    ? "Enviando..."
+                    : "Enviar solicitud"}
+                </span>
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
       <Modal
         open={showLocationHelp}
@@ -9560,14 +10159,25 @@ const filteredRecords = useMemo(() => {
             Si sigue sin funcionar, revisa también los permisos de ubicación
             del navegador en la configuración del sistema.
           </div>
-          <div className="flex justify-end">
-            <Button
-              variant="secondary"
-              className={POPUP_NEUTRAL_BUTTON_CLASS}
+          
+          <div className="flex justify-end pt-2">
+            <button
+              type="button"
               onClick={() => setShowLocationHelp(false)}
+              className="group flex h-11 items-center justify-center gap-2 rounded-xl border border-emerald-500 bg-white px-5 text-sm font-semibold text-emerald-600 shadow-sm transition-all duration-300 hover:bg-emerald-50 active:scale-95 whitespace-nowrap"
             >
-              Entendido
-            </Button>
+              <svg
+                className="h-4 w-4 text-emerald-500 transition-transform duration-300 group-hover:scale-110"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+              </svg>
+              <span>Entendido</span>
+            </button>
           </div>
         </div>
       </Modal>
@@ -9576,9 +10186,7 @@ const filteredRecords = useMemo(() => {
         open={!!selectedRecordForDetail}
         onClose={() => setSelectedRecordForDetail(null)}
         title="Detalle del Fichaje"
-        panelClassName={
-          isManagerMode && isFunctionalAdmin ? "max-w-4xl" : "max-w-lg"
-        }
+        panelClassName="max-w-4xl"
       >
         {selectedRecordForDetail &&
           renderRecordDetailContent(selectedRecordForDetail)}

@@ -1,7 +1,9 @@
-# Control Horario - Documento fusionado
+# Control Horario - Estado actual
 
-El contenido de estado actual se ha fusionado en el documento principal:
+El estado funcional y tecnico actualizado del modulo se mantiene en el documento principal:
 
 [docs/Control-Horario.md](c:/Users/Becario01/Desktop/Diego/ERP-CETEMET--main/docs/Control-Horario.md)
 
-Este archivo se mantiene solo como referencia temporal para evitar duplicidad mientras se actualizan accesos o hábitos de consulta.
+Este archivo queda como acceso rapido para evitar duplicar informacion.
+
+Ultima actualizacion: 16/06/2026.

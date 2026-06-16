@@ -11,6 +11,10 @@ interface DbPermissionRequestRow {
   department_id: string;
   permission_date: string;
   permission_type: PermissionRequestRecord["permissionType"];
+  legal_permission_type: PermissionRequestRecord["legalPermissionType"];
+  attachment_url: string | null;
+  requested_units: number | null;
+  requested_unit_type: PermissionRequestRecord["requestedUnitType"];
   reason: string;
   status: PermissionRequestRecord["status"];
   approver_id: string | null;
@@ -25,6 +29,10 @@ const mapRow = (row: DbPermissionRequestRow): PermissionRequestRecord => ({
   departmentId: row.department_id,
   permissionDate: row.permission_date,
   permissionType: row.permission_type,
+  legalPermissionType: row.legal_permission_type,
+  attachmentUrl: row.attachment_url,
+  requestedUnits: row.requested_units,
+  requestedUnitType: row.requested_unit_type,
   reason: row.reason,
   status: row.status,
   approverId: row.approver_id,
@@ -58,15 +66,20 @@ class MySqlPermissionRequestsRepository
   ): Promise<PermissionRequestRecord> {
     await getMySqlPool().query(
       `INSERT INTO permission_requests (
-        id, user_id, department_id, permission_date, permission_type, reason,
+        id, user_id, department_id, permission_date, permission_type,
+        legal_permission_type, attachment_url, requested_units, requested_unit_type, reason,
         status, approver_id, approver_comment, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       [
         input.id,
         input.userId,
         input.departmentId,
         input.permissionDate,
         input.permissionType,
+        input.legalPermissionType ?? null,
+        input.attachmentUrl?.trim() || null,
+        input.requestedUnits ?? null,
+        input.requestedUnitType ?? null,
         input.reason,
         input.status,
         input.approverId ?? null,
@@ -89,7 +102,7 @@ class MySqlPermissionRequestsRepository
     filters: PermissionRequestFilters,
   ): Promise<PermissionRequestRecord[]> {
     let sql =
-      "SELECT id, user_id, department_id, permission_date, permission_type, reason, status, approver_id, approver_comment, created_at, updated_at FROM permission_requests WHERE 1=1";
+      "SELECT id, user_id, department_id, permission_date, permission_type, legal_permission_type, attachment_url, requested_units, requested_unit_type, reason, status, approver_id, approver_comment, created_at, updated_at FROM permission_requests WHERE 1=1";
     const args: Array<string> = [];
 
     if (filters.departmentId) {
@@ -131,7 +144,7 @@ class MySqlPermissionRequestsRepository
 
   async getById(id: string): Promise<PermissionRequestRecord | null> {
     const [rows] = await getMySqlPool().query<DbPermissionRequestRow[]>(
-      "SELECT id, user_id, department_id, permission_date, permission_type, reason, status, approver_id, approver_comment, created_at, updated_at FROM permission_requests WHERE id = ? LIMIT 1",
+      "SELECT id, user_id, department_id, permission_date, permission_type, legal_permission_type, attachment_url, requested_units, requested_unit_type, reason, status, approver_id, approver_comment, created_at, updated_at FROM permission_requests WHERE id = ? LIMIT 1",
       [id],
     );
     return rows[0] ? mapRow(rows[0]) : null;

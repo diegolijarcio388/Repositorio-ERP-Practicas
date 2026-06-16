@@ -758,12 +758,12 @@ export function CoordinatorProjectsWorkspace({ session }: Props) {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div>
+      <div className="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
           <h2 className="text-lg font-semibold">Gestión de Proyectos</h2>
           <p className="mt-0.5 text-sm text-slate-500">Panel del responsable — proyectos, horas del equipo y gastos.</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-col gap-2 min-[420px]:flex-row sm:shrink-0 sm:items-center">
           {pendingExpenses.length > 0 && (
             <span className="rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-700">
               {pendingExpenses.length} gasto{pendingExpenses.length > 1 ? "s" : ""} pendiente{pendingExpenses.length > 1 ? "s" : ""}
@@ -866,8 +866,8 @@ export function CoordinatorProjectsWorkspace({ session }: Props) {
           <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
             Pendientes de revision: {projectEntries.filter((entry) => entry.reviewStatus === "PENDING").length + pendingHourBagEntries.length}
           </div>
-          <div className="flex gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-            <div className="flex-1">
+          <div className="grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+            <div className="min-w-0">
               <label className="mb-1 block text-xs font-medium text-slate-600">Proyecto</label>
               <select
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
@@ -878,7 +878,7 @@ export function CoordinatorProjectsWorkspace({ session }: Props) {
                 {projects.map((p) => <option key={p.id} value={p.id}>{p.code} – {p.name}</option>)}
               </select>
             </div>
-            <div className="flex-1">
+            <div className="min-w-0">
               <label className="mb-1 block text-xs font-medium text-slate-600">Tarea</label>
               <input
                 type="text"
@@ -888,13 +888,13 @@ export function CoordinatorProjectsWorkspace({ session }: Props) {
                 className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
-            <div>
+            <div className="min-w-0 sm:col-span-2 lg:col-span-1 lg:min-w-[180px]">
               <label className="mb-1 block text-xs font-medium text-slate-600">Mes (opcional)</label>
               <input
                 type="month"
                 value={filterDate}
                 onChange={(e) => setFilterDate(e.target.value)}
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm"
+                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm"
               />
             </div>
           </div>

@@ -3,7 +3,10 @@ import { withApiError } from "../../../core/server/api-handler";
 import { jsonOk } from "../../../core/server/api-response";
 import { requireApiUser } from "../../../modules/rbac/services/api-auth";
 import { createPermissionsService } from "../../../modules/permissions/services/permissions.service";
-import type { PermissionRequestStatus } from "../../../modules/permissions/domain/types";
+import type {
+  LegalPermissionType,
+  PermissionRequestStatus,
+} from "../../../modules/permissions/domain/types";
 
 const permissionsService = createPermissionsService();
 
@@ -32,6 +35,8 @@ export const POST: APIRoute = withApiError(async (context) => {
     userId?: string;
     permissionDate?: string;
     reason?: string;
+    legalPermissionType?: LegalPermissionType | null;
+    attachmentUrl?: string | null;
     status?: PermissionRequestStatus;
     approverComment?: string;
   };
@@ -40,6 +45,8 @@ export const POST: APIRoute = withApiError(async (context) => {
     userId: body.userId?.trim() || user.userId,
     permissionDate: body.permissionDate ?? "",
     reason: body.reason ?? "",
+    legalPermissionType: body.legalPermissionType ?? null,
+    attachmentUrl: body.attachmentUrl ?? null,
     status: body.status,
     approverComment: body.approverComment,
   });

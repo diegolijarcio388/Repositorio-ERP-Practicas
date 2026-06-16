@@ -11,6 +11,7 @@ const AUTH_STORAGE_KEY = "auth_session";
 const lookupUser = async (
   email: string,
 ): Promise<{
+  email?: string;
   role: Role;
   displayName: string;
   canManageTimeControlRequests: boolean;
@@ -27,6 +28,7 @@ const lookupUser = async (
     if (res.ok) {
       const data = await res.json();
       return {
+        email,
         role: data.role as Role,
         displayName: data.displayName,
         canManageTimeControlRequests: Boolean(
@@ -46,12 +48,50 @@ const lookupUser = async (
   }
   const [leftSide] = email.split("@");
   return {
+    email,
     role: "Empleado",
     displayName: leftSide.charAt(0).toUpperCase() + leftSide.slice(1),
     canManageTimeControlRequests: false,
     timeControlDevicePolicy: "TABLET_ONLY",
     canManageVacations: false,
     canManageProjects: false,
+  };
+};
+
+const lookupUserByTabletCode = async (
+  code: string,
+): Promise<{
+  email: string;
+  role: Role;
+  displayName: string;
+  canManageTimeControlRequests: boolean;
+  timeControlDevicePolicy: "TABLET_ONLY" | "MOBILE_ONLY" | "TABLET_OR_MOBILE";
+  canManageVacations: boolean;
+  canManageProjects: boolean;
+}> => {
+  const res = await fetch("/api/auth/tablet-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code }),
+  });
+
+  if (!res.ok) {
+    throw new Error("Código de tablet no válido.");
+  }
+
+  const data = await res.json();
+  return {
+    email: String(data.email ?? "").trim().toLowerCase(),
+    role: data.role as Role,
+    displayName: data.displayName,
+    canManageTimeControlRequests: Boolean(data.canManageTimeControlRequests),
+    timeControlDevicePolicy:
+      data.timeControlDevicePolicy === "MOBILE_ONLY" ||
+      data.timeControlDevicePolicy === "TABLET_OR_MOBILE"
+        ? data.timeControlDevicePolicy
+        : "TABLET_ONLY",
+    canManageVacations: Boolean(data.canManageVacations),
+    canManageProjects: Boolean(data.canManageProjects),
   };
 };
 
@@ -75,29 +115,42 @@ const writeSessionCookie = (session: UserSession | null): void => {
 };
 
 class LocalAuthService implements AuthProvider {
-  async login(email: string): Promise<UserSession> {
-    const normalizedEmail = email.trim().toLowerCase();
-    const {
-      role,
-      displayName,
-      canManageTimeControlRequests,
-      timeControlDevicePolicy,
-      canManageVacations,
-      canManageProjects,
-    } = await lookupUser(normalizedEmail);
+  private createSessionFromUser(user: {
+    email: string;
+    role: Role;
+    displayName: string;
+    canManageTimeControlRequests: boolean;
+    timeControlDevicePolicy: "TABLET_ONLY" | "MOBILE_ONLY" | "TABLET_OR_MOBILE";
+    canManageVacations: boolean;
+    canManageProjects: boolean;
+  }): UserSession {
     const session: UserSession = {
-      email: normalizedEmail,
-      role,
-      displayName,
-      canManageTimeControlRequests,
-      timeControlDevicePolicy,
-      canManageVacations,
-      canManageProjects,
+      email: user.email,
+      role: user.role,
+      displayName: user.displayName,
+      canManageTimeControlRequests: user.canManageTimeControlRequests,
+      timeControlDevicePolicy: user.timeControlDevicePolicy,
+      canManageVacations: user.canManageVacations,
+      canManageProjects: user.canManageProjects,
     };
     storage.set(AUTH_STORAGE_KEY, session);
     writeSessionCookie(session);
     notifySessionChange(session);
     return session;
+  }
+
+  async login(email: string): Promise<UserSession> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const user = await lookupUser(normalizedEmail);
+    return this.createSessionFromUser({
+      ...user,
+      email: user.email ?? normalizedEmail,
+    });
+  }
+
+  async loginWithTabletCode(code: string): Promise<UserSession> {
+    const user = await lookupUserByTabletCode(code.trim());
+    return this.createSessionFromUser(user);
   }
 
   async logout(): Promise<void> {
