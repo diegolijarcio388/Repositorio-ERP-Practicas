@@ -25,3 +25,4 @@ pnpm-debug.log*
 
 # database
 cetemet_ERP.sql
+/public/uploads/permissions/
