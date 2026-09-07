@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS time_control_shift_segments (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 ALTER TABLE users
-  ADD COLUMN IF NOT EXISTS time_control_shift_id VARCHAR(64) NULL
+  ADD COLUMN time_control_shift_id VARCHAR(64) NULL
   AFTER time_control_device_policy;
 
 INSERT IGNORE INTO time_control_shifts (

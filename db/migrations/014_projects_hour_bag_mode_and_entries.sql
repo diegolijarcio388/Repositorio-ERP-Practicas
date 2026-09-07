@@ -5,7 +5,6 @@ ALTER TABLE projects
 CREATE TABLE IF NOT EXISTS project_hour_bag_entries (
   id VARCHAR(64) PRIMARY KEY,
   project_id VARCHAR(64) NOT NULL,
-  assigned_user_id VARCHAR(64) NULL,
   company VARCHAR(255) NOT NULL,
   purchase_order_number VARCHAR(128) NOT NULL,
   external_project_name VARCHAR(255) NOT NULL,
@@ -23,7 +22,6 @@ CREATE TABLE IF NOT EXISTS project_hour_bag_entries (
   INDEX idx_hour_bag_project (project_id),
   INDEX idx_hour_bag_date (date),
   CONSTRAINT fk_hour_bag_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
-  CONSTRAINT fk_hour_bag_assigned_user FOREIGN KEY (assigned_user_id) REFERENCES users(id),
   CONSTRAINT fk_hour_bag_created_by FOREIGN KEY (created_by) REFERENCES users(id),
   CONSTRAINT fk_hour_bag_updated_by FOREIGN KEY (updated_by) REFERENCES users(id)
 );

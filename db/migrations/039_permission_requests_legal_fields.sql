@@ -11,10 +11,10 @@ ALTER TABLE permission_requests
     'APPROVED',
     'REJECTED'
   ) NOT NULL DEFAULT 'PENDING_COORDINATOR',
-  ADD COLUMN IF NOT EXISTS legal_permission_type VARCHAR(64) NULL AFTER permission_type,
-  ADD COLUMN IF NOT EXISTS attachment_url VARCHAR(500) NULL AFTER legal_permission_type,
-  ADD COLUMN IF NOT EXISTS requested_units INT NULL AFTER attachment_url,
-  ADD COLUMN IF NOT EXISTS requested_unit_type VARCHAR(32) NULL AFTER requested_units;
+  ADD COLUMN legal_permission_type VARCHAR(64) NULL AFTER permission_type,
+  ADD COLUMN attachment_url VARCHAR(500) NULL AFTER legal_permission_type,
+  ADD COLUMN requested_units INT NULL AFTER attachment_url,
+  ADD COLUMN requested_unit_type VARCHAR(32) NULL AFTER requested_units;
 
 ALTER TABLE permission_requests
   MODIFY COLUMN attachment_url TEXT NULL;

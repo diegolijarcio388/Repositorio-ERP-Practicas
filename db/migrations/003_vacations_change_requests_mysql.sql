@@ -32,6 +32,6 @@ ALTER TABLE vacation_events_history
   ) NOT NULL;
 
 ALTER TABLE vacation_requests
-  ADD COLUMN IF NOT EXISTS proposed_days_json JSON NULL AFTER approver_comment,
-  ADD COLUMN IF NOT EXISTS change_request_comment TEXT NULL AFTER proposed_days_json,
-  ADD COLUMN IF NOT EXISTS change_origin_status ENUM('PENDING_ADMIN', 'APPROVED') NULL AFTER change_request_comment;
+  ADD COLUMN proposed_days_json JSON NULL AFTER approver_comment,
+  ADD COLUMN change_request_comment TEXT NULL AFTER proposed_days_json,
+  ADD COLUMN change_origin_status ENUM('PENDING_ADMIN', 'APPROVED') NULL AFTER change_request_comment;

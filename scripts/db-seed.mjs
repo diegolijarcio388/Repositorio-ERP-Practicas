@@ -4,13 +4,14 @@ import { resolve } from "node:path";
 
 const loadEnvFromFile = () => {
   try {
-    const envPath = resolve(process.cwd(), ".env");
-    const content = readFileSync(envPath, "utf8");
+    const content = readFileSync(resolve(process.cwd(), ".env"), "utf8");
     for (const line of content.split(/\r?\n/)) {
       const trimmed = line.trim();
       if (!trimmed || trimmed.startsWith("#")) continue;
+
       const separatorIndex = trimmed.indexOf("=");
       if (separatorIndex <= 0) continue;
+
       const key = trimmed.slice(0, separatorIndex).trim();
       let value = trimmed.slice(separatorIndex + 1).trim();
       if (
@@ -22,91 +23,1470 @@ const loadEnvFromFile = () => {
       if (!(key in process.env)) process.env[key] = value;
     }
   } catch {
-    // .env es opcional; si no existe se usan variables del entorno.
+    // El archivo .env es opcional; también se admiten variables del entorno.
   }
 };
 
 loadEnvFromFile();
 
 const databaseUrl = process.env.MYSQL_URL || process.env.DATABASE_URL;
-if (!databaseUrl) throw new Error("MYSQL_URL o DATABASE_URL requerido.");
-
-const now = new Date().toISOString().slice(0, 23).replace("T", " ");
+if (!databaseUrl) {
+  throw new Error("MYSQL_URL o DATABASE_URL requerido.");
+}
 
 const pool = mysql.createPool({ uri: databaseUrl });
+const now = new Date().toISOString().slice(0, 23).replace("T", " ");
+const createdAt = "2026-01-02 09:00:00.000";
+let seededRows = 0;
+
+const quoteIdentifier = (identifier) => {
+  if (!/^[a-z][a-z0-9_]*$/i.test(identifier)) {
+    throw new Error(`Identificador SQL no válido: ${identifier}`);
+  }
+  return `\`${identifier}\``;
+};
+
+const upsertRows = async (
+  connection,
+  table,
+  columns,
+  rows,
+  updateColumns = columns.slice(1),
+) => {
+  if (rows.length === 0) return;
+  if (rows.some((row) => row.length !== columns.length)) {
+    throw new Error(`Fila de seed inválida para ${table}.`);
+  }
+
+  const columnSql = columns.map(quoteIdentifier).join(", ");
+  const valuesSql = rows
+    .map(() => `(${columns.map(() => "?").join(", ")})`)
+    .join(", ");
+  const updateSql = updateColumns
+    .map((column) => {
+      const identifier = quoteIdentifier(column);
+      return `${identifier} = VALUES(${identifier})`;
+    })
+    .join(", ");
+
+  await connection.query(
+    `INSERT INTO ${quoteIdentifier(table)} (${columnSql}) VALUES ${valuesSql}
+     ON DUPLICATE KEY UPDATE ${updateSql}`,
+    rows.flat(),
+  );
+  seededRows += rows.length;
+};
+
+const json = (value) => JSON.stringify(value);
+
+const connection = await pool.getConnection();
 
 try {
-  // Datos completamente ficticios para desarrollo y demostraciones.
-  await pool.query("DELETE FROM notifications");
-  await pool.query("DELETE FROM vacation_events_history");
-  await pool.query("DELETE FROM vacation_blocks");
-  await pool.query("DELETE FROM calendar_events");
-  await pool.query("DELETE FROM vacation_requests");
-  await pool.query("DELETE FROM users");
-  await pool.query("DELETE FROM departments");
+  await connection.beginTransaction();
 
-  await pool.query(
-    `INSERT INTO departments (id, name, coordinator_user_id) VALUES
-      ('dep-direccion', 'Dirección de ejemplo', 'u-admin-1'),
-      ('dep-operaciones', 'Operaciones de ejemplo', 'u-worker-ops-1'),
-      ('dep-ingenieria', 'Ingeniería de ejemplo', 'u-coord-eng-1'),
-      ('dep-servicios', 'Servicios de ejemplo', 'u-coord-services-1')`,
+  // Todos los registros usan IDs demo-* y datos inequívocamente ficticios.
+  await upsertRows(
+    connection,
+    "time_control_shifts",
+    [
+      "id",
+      "name",
+      "description",
+      "is_active",
+      "allows_overnight",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-shift-standard",
+        "Turno de demostración",
+        "Horario ficticio para probar el control de jornada.",
+        1,
+        0,
+        createdAt,
+        now,
+      ],
+    ],
   );
 
-  await pool.query(
-    `INSERT INTO users (
-      id,
-      name,
-      job_title,
-      email,
-      department_id,
-      role,
-      can_manage_time_control_requests,
-      time_control_device_policy,
-      can_manage_vacations,
-      can_manage_projects
-    ) VALUES
-      ('u-admin-1', 'Administrador Demo 1', NULL, 'admin1@example.com', 'dep-direccion', 'admin', 1, 'TABLET_OR_MOBILE', 1, 1),
-      ('u-admin-2', 'Administrador Demo 2', NULL, 'admin2@example.com', 'dep-direccion', 'admin', 1, 'TABLET_OR_MOBILE', 1, 1),
-      ('u-coord-ops-1', 'Coordinación Operaciones Demo', NULL, 'coord.operaciones@example.com', 'dep-operaciones', 'coordinator', 1, 'TABLET_OR_MOBILE', 1, 0),
-      ('u-worker-ops-1', 'Usuario Operaciones Demo 1', NULL, 'operaciones1@example.com', 'dep-operaciones', 'admin', 1, 'TABLET_OR_MOBILE', 1, 1),
-      ('u-coord-eng-1', 'Coordinación Ingeniería Demo', NULL, 'coord.ingenieria@example.com', 'dep-ingenieria', 'coordinator', 1, 'TABLET_OR_MOBILE', 1, 0),
-      ('u-worker-eng-1', 'Usuario Ingeniería Demo 1', NULL, 'ingenieria1@example.com', 'dep-ingenieria', 'worker', 0, 'TABLET_ONLY', 0, 0),
-      ('u-worker-eng-2', 'Usuario Ingeniería Demo 2', NULL, 'ingenieria2@example.com', 'dep-ingenieria', 'worker', 0, 'TABLET_ONLY', 0, 0),
-      ('u-coord-services-1', 'Coordinación Servicios Demo', NULL, 'coord.servicios@example.com', 'dep-servicios', 'coordinator', 1, 'TABLET_OR_MOBILE', 1, 1),
-      ('u-worker-services-1', 'Usuario Servicios Demo 1', NULL, 'servicios1@example.com', 'dep-servicios', 'worker', 0, 'TABLET_ONLY', 0, 0)`,
+  await upsertRows(
+    connection,
+    "time_control_shift_segments",
+    [
+      "id",
+      "shift_id",
+      "segment_order",
+      "start_time",
+      "end_time",
+      "tolerance_start_minutes",
+      "tolerance_end_minutes",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-shift-standard-segment-1",
+        "demo-shift-standard",
+        1,
+        "08:00:00",
+        "16:00:00",
+        15,
+        15,
+        createdAt,
+        now,
+      ],
+    ],
   );
 
-  await pool.query(
-    `INSERT INTO calendar_events (
-      id, title, description, type, scope, department_id, days_json, start_date, end_date,
-      all_day, blocks_selection, created_by, created_at, updated_at
-    ) VALUES
-      ('cal-1', 'Día no laborable de ejemplo 01', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-01-09"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-2', 'Día no laborable de ejemplo 02', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-02-06"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-3', 'Día no laborable de ejemplo 03', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-03-13"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-4', 'Día no laborable de ejemplo 04', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-04-17"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-5', 'Día no laborable de ejemplo 05', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-05-22"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-6', 'Día no laborable de ejemplo 06', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-06-26"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-7', 'Día no laborable de ejemplo 07', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-07-10"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-8', 'Día no laborable de ejemplo 08', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-08-21"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-9', 'Día no laborable de ejemplo 09', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-09-18"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-10', 'Día no laborable de ejemplo 10', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-10-23"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-11', 'Día no laborable de ejemplo 11', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-11-06"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-12', 'Día no laborable de ejemplo 12', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-11-20"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-13', 'Día no laborable de ejemplo 13', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-12-04"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-14', 'Día no laborable de ejemplo 14', 'Fecha ficticia para demostraciones', 'HOLIDAY', 'GLOBAL', NULL, '["2026-12-18"]', NULL, NULL, 1, 1, 'u-admin-1', ?, ?),
-      ('cal-15', 'Jornada interna de ejemplo', 'Evento ficticio no bloqueante', 'EVENT', 'DEPARTMENT', 'dep-ingenieria', '["2026-03-16"]', NULL, NULL, 1, 0, 'u-admin-1', ?, ?)` ,
-    Array(30).fill(now),
+  const departments = [
+    ["demo-dep-direccion", "Dirección de ejemplo", null],
+    ["demo-dep-operaciones", "Operaciones de ejemplo", null],
+    ["demo-dep-ingenieria", "Ingeniería de ejemplo", null],
+  ];
+  await upsertRows(
+    connection,
+    "departments",
+    ["id", "name", "coordinator_user_id"],
+    departments,
   );
 
-  await pool.query(
-    `INSERT INTO vacation_blocks (id, department_id, days_json, start_date, end_date, reason, created_by, created_at)
-     VALUES ('vblock-1', 'dep-ingenieria', '["2026-08-14"]', NULL, NULL, 'Bloqueo ficticio de ejemplo', 'u-coord-eng-1', ?)`,
-    [now],
+  await upsertRows(
+    connection,
+    "users",
+    [
+      "id",
+      "name",
+      "job_title",
+      "email",
+      "department_id",
+      "role",
+      "can_manage_time_control_requests",
+      "time_control_device_policy",
+      "time_control_tablet_code",
+      "time_control_shift_id",
+      "can_manage_vacations",
+      "can_manage_projects",
+    ],
+    [
+      [
+        "demo-user-admin",
+        "Administrador Demo",
+        "Administración de ejemplo",
+        "admin@example.com",
+        "demo-dep-direccion",
+        "admin",
+        1,
+        "TABLET_OR_MOBILE",
+        "1001",
+        "demo-shift-standard",
+        1,
+        1,
+      ],
+      [
+        "demo-user-coord-ops",
+        "Coordinador Demo Operaciones",
+        "Coordinación de ejemplo",
+        "responsable@example.com",
+        "demo-dep-operaciones",
+        "coordinator",
+        1,
+        "TABLET_OR_MOBILE",
+        "1002",
+        "demo-shift-standard",
+        1,
+        1,
+      ],
+      [
+        "demo-user-worker-ops-1",
+        "Persona Demo Operaciones 1",
+        "Técnico de ejemplo",
+        "trabajador@example.com",
+        "demo-dep-operaciones",
+        "worker",
+        0,
+        "TABLET_ONLY",
+        "1003",
+        "demo-shift-standard",
+        0,
+        0,
+      ],
+      [
+        "demo-user-worker-ops-2",
+        "Persona Demo Operaciones 2",
+        "Técnico de ejemplo",
+        "demo.operaciones2@example.com",
+        "demo-dep-operaciones",
+        "worker",
+        0,
+        "MOBILE_ONLY",
+        "1004",
+        "demo-shift-standard",
+        0,
+        0,
+      ],
+      [
+        "demo-user-coord-eng",
+        "Coordinador Demo Ingeniería",
+        "Coordinación de ejemplo",
+        "demo.coord.ingenieria@example.com",
+        "demo-dep-ingenieria",
+        "coordinator",
+        1,
+        "TABLET_OR_MOBILE",
+        "1005",
+        "demo-shift-standard",
+        1,
+        1,
+      ],
+      [
+        "demo-user-worker-eng",
+        "Persona Demo Ingeniería",
+        "Desarrollo de ejemplo",
+        "demo.ingenieria@example.com",
+        "demo-dep-ingenieria",
+        "worker",
+        0,
+        "TABLET_ONLY",
+        "1006",
+        "demo-shift-standard",
+        0,
+        0,
+      ],
+    ],
   );
 
-  console.log("Seed completado.");
+  await upsertRows(
+    connection,
+    "departments",
+    ["id", "name", "coordinator_user_id"],
+    [
+      ["demo-dep-direccion", "Dirección de ejemplo", "demo-user-admin"],
+      ["demo-dep-operaciones", "Operaciones de ejemplo", "demo-user-coord-ops"],
+      ["demo-dep-ingenieria", "Ingeniería de ejemplo", "demo-user-coord-eng"],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "projects",
+    [
+      "id",
+      "code",
+      "name",
+      "client_name",
+      "status",
+      "start_date",
+      "end_date",
+      "total_budget_hours",
+      "hour_tracking_mode",
+      "manager_id",
+      "created_by",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-project-general",
+        "DEMO-GEN-001",
+        "Portal interno de ejemplo",
+        "Cliente Demo Uno",
+        "ACTIVE",
+        "2026-01-12",
+        "2026-10-30",
+        240,
+        "GENERAL",
+        "demo-user-coord-ops",
+        "demo-user-admin",
+        createdAt,
+        now,
+      ],
+      [
+        "demo-project-structured",
+        "DEMO-STR-001",
+        "Plataforma estructurada de ejemplo",
+        "Cliente Demo Dos",
+        "ACTIVE",
+        "2026-02-02",
+        "2026-12-18",
+        480,
+        "STRUCTURED",
+        "demo-user-coord-eng",
+        "demo-user-admin",
+        createdAt,
+        now,
+      ],
+      [
+        "demo-project-block",
+        "DEMO-BLK-001",
+        "Componente técnico de ejemplo",
+        "Cliente Demo Tres",
+        "PAUSED",
+        "2026-03-02",
+        null,
+        160,
+        "BUILDING_BLOCK",
+        "demo-user-coord-eng",
+        "demo-user-admin",
+        createdAt,
+        now,
+      ],
+      [
+        "demo-project-hour-bag",
+        "DEMO-BOL-001",
+        "Bolsa de horas de ejemplo",
+        "Cliente Demo Cuatro",
+        "ACTIVE",
+        null,
+        null,
+        null,
+        "BOLSA_HORAS",
+        "demo-user-coord-ops",
+        "demo-user-admin",
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "project_work_packages",
+    [
+      "id",
+      "project_id",
+      "name",
+      "budget_hours",
+      "start_date",
+      "end_date",
+      "position",
+      "created_at",
+    ],
+    [
+      [
+        "demo-package-analysis",
+        "demo-project-structured",
+        "Paquete de análisis de ejemplo",
+        160,
+        "2026-02-02",
+        "2026-05-29",
+        1,
+        createdAt,
+      ],
+      [
+        "demo-package-build",
+        "demo-project-structured",
+        "Paquete de construcción de ejemplo",
+        320,
+        "2026-06-01",
+        "2026-12-18",
+        2,
+        createdAt,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "project_tasks",
+    [
+      "id",
+      "project_id",
+      "work_package_id",
+      "name",
+      "budget_hours",
+      "start_date",
+      "end_date",
+      "is_default",
+      "position",
+      "created_at",
+    ],
+    [
+      [
+        "demo-task-general",
+        "demo-project-general",
+        null,
+        "Tarea general de ejemplo",
+        240,
+        "2026-01-12",
+        "2026-10-30",
+        1,
+        1,
+        createdAt,
+      ],
+      [
+        "demo-task-analysis",
+        "demo-project-structured",
+        "demo-package-analysis",
+        "Análisis funcional de ejemplo",
+        160,
+        "2026-02-02",
+        "2026-05-29",
+        0,
+        1,
+        createdAt,
+      ],
+      [
+        "demo-task-build",
+        "demo-project-structured",
+        "demo-package-build",
+        "Implementación de ejemplo",
+        240,
+        "2026-06-01",
+        "2026-10-30",
+        0,
+        1,
+        createdAt,
+      ],
+      [
+        "demo-task-qa",
+        "demo-project-structured",
+        "demo-package-build",
+        "Pruebas de ejemplo",
+        80,
+        "2026-11-02",
+        "2026-12-18",
+        0,
+        2,
+        createdAt,
+      ],
+      [
+        "demo-task-block",
+        "demo-project-block",
+        null,
+        "Bloque técnico de ejemplo",
+        160,
+        "2026-03-02",
+        null,
+        1,
+        1,
+        createdAt,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "project_assignments",
+    ["id", "project_id", "user_id", "assigned_by", "created_at"],
+    [
+      [
+        "demo-assignment-general-ops1",
+        "demo-project-general",
+        "demo-user-worker-ops-1",
+        "demo-user-coord-ops",
+        createdAt,
+      ],
+      [
+        "demo-assignment-general-ops2",
+        "demo-project-general",
+        "demo-user-worker-ops-2",
+        "demo-user-coord-ops",
+        createdAt,
+      ],
+      [
+        "demo-assignment-structured-eng",
+        "demo-project-structured",
+        "demo-user-worker-eng",
+        "demo-user-coord-eng",
+        createdAt,
+      ],
+      [
+        "demo-assignment-block-eng",
+        "demo-project-block",
+        "demo-user-worker-eng",
+        "demo-user-coord-eng",
+        createdAt,
+      ],
+      [
+        "demo-assignment-hour-bag-ops1",
+        "demo-project-hour-bag",
+        "demo-user-worker-ops-1",
+        "demo-user-coord-ops",
+        createdAt,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "project_task_assignments",
+    ["id", "project_id", "task_id", "user_id", "assigned_by", "created_at"],
+    [
+      [
+        "demo-task-assignment-general-ops1",
+        "demo-project-general",
+        "demo-task-general",
+        "demo-user-worker-ops-1",
+        "demo-user-coord-ops",
+        createdAt,
+      ],
+      [
+        "demo-task-assignment-analysis-eng",
+        "demo-project-structured",
+        "demo-task-analysis",
+        "demo-user-worker-eng",
+        "demo-user-coord-eng",
+        createdAt,
+      ],
+      [
+        "demo-task-assignment-build-eng",
+        "demo-project-structured",
+        "demo-task-build",
+        "demo-user-worker-eng",
+        "demo-user-coord-eng",
+        createdAt,
+      ],
+      [
+        "demo-task-assignment-block-eng",
+        "demo-project-block",
+        "demo-task-block",
+        "demo-user-worker-eng",
+        "demo-user-coord-eng",
+        createdAt,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "project_time_entries",
+    [
+      "id",
+      "project_id",
+      "task_id",
+      "user_id",
+      "date",
+      "hours",
+      "description",
+      "review_status",
+      "reviewed_by",
+      "reviewed_at",
+      "rejection_reason",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-project-time-approved",
+        "demo-project-general",
+        "demo-task-general",
+        "demo-user-worker-ops-1",
+        "2026-04-06",
+        6.5,
+        "Trabajo ficticio en el portal de ejemplo.",
+        "APPROVED",
+        "demo-user-coord-ops",
+        "2026-04-07 10:00:00.000",
+        null,
+        "demo-user-worker-ops-1",
+        "demo-user-worker-ops-1",
+        createdAt,
+        now,
+      ],
+      [
+        "demo-project-time-pending",
+        "demo-project-structured",
+        "demo-task-build",
+        "demo-user-worker-eng",
+        "2026-06-08",
+        7.25,
+        "Implementación ficticia de una funcionalidad de ejemplo.",
+        "PENDING",
+        null,
+        null,
+        null,
+        "demo-user-worker-eng",
+        null,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-project-time-rejected",
+        "demo-project-structured",
+        "demo-task-analysis",
+        "demo-user-worker-eng",
+        "2026-03-09",
+        2,
+        "Registro ficticio para mostrar una revisión rechazada.",
+        "REJECTED",
+        "demo-user-coord-eng",
+        "2026-03-10 11:00:00.000",
+        "Descripción insuficiente en este ejemplo.",
+        "demo-user-worker-eng",
+        "demo-user-coord-eng",
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "project_hour_bag_entries",
+    [
+      "id",
+      "project_id",
+      "assigned_user_id",
+      "company",
+      "purchase_order_number",
+      "external_project_name",
+      "task_name",
+      "building_block",
+      "specialization",
+      "area",
+      "resource_name",
+      "hours",
+      "date",
+      "review_status",
+      "reviewed_by",
+      "reviewed_at",
+      "rejection_reason",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-hour-bag-pending",
+        "demo-project-hour-bag",
+        "demo-user-worker-ops-1",
+        "Empresa Demo Uno",
+        "PEDIDO-DEMO-001",
+        "Proyecto externo de ejemplo",
+        "Soporte ficticio",
+        "Bloque Demo A",
+        "Especialidad de ejemplo",
+        "Área Demo",
+        "Recurso Demo 1",
+        4,
+        "2026-05-11",
+        "PENDING",
+        null,
+        null,
+        null,
+        "demo-user-coord-ops",
+        "demo-user-worker-ops-1",
+        createdAt,
+        now,
+      ],
+      [
+        "demo-hour-bag-empty",
+        "demo-project-hour-bag",
+        "demo-user-worker-ops-2",
+        "Empresa Demo Dos",
+        "PEDIDO-DEMO-002",
+        "Proyecto externo de ejemplo",
+        "Tarea pendiente de ejemplo",
+        "Bloque Demo B",
+        "Especialidad de ejemplo",
+        "Área Demo",
+        "Recurso Demo 2",
+        null,
+        null,
+        "EMPTY",
+        null,
+        null,
+        null,
+        "demo-user-coord-ops",
+        null,
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "internal_time_entries",
+    [
+      "id",
+      "category",
+      "user_id",
+      "date",
+      "hours",
+      "description",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-internal-training",
+        "FORMACION_RECIBIDA",
+        "demo-user-worker-ops-1",
+        "2026-04-10",
+        2,
+        "Formación interna ficticia.",
+        "demo-user-worker-ops-1",
+        null,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-internal-commercial",
+        "ACTIVIDADES_COMERCIALES",
+        "demo-user-worker-eng",
+        "2026-04-13",
+        1.5,
+        "Actividad comercial de ejemplo.",
+        "demo-user-worker-eng",
+        "demo-user-worker-eng",
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "caff_time_entries",
+    [
+      "id",
+      "user_id",
+      "section",
+      "date",
+      "hours",
+      "description",
+      "created_by",
+      "updated_by",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-caff-meeting",
+        "demo-user-worker-ops-2",
+        "REUNION_CAF",
+        "2026-04-14",
+        1,
+        "Reunión ficticia de coordinación.",
+        "demo-user-worker-ops-2",
+        null,
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "project_budget_partitions",
+    ["id", "project_id", "name", "budget_amount", "created_at", "updated_at"],
+    [
+      [
+        "demo-budget-personnel",
+        "demo-project-structured",
+        "Personal de ejemplo",
+        25000,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-budget-materials",
+        "demo-project-structured",
+        "Materiales de ejemplo",
+        5000,
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "project_expenses",
+    [
+      "id",
+      "partition_id",
+      "project_id",
+      "user_id",
+      "amount",
+      "description",
+      "receipt_url",
+      "status",
+      "reviewed_by",
+      "reviewed_at",
+      "rejection_reason",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-expense-approved",
+        "demo-budget-materials",
+        "demo-project-structured",
+        "demo-user-worker-eng",
+        125.5,
+        "Compra ficticia de material de pruebas.",
+        "https://example.com/comprobantes/demo-001.pdf",
+        "APPROVED",
+        "demo-user-coord-eng",
+        "2026-04-16 12:00:00.000",
+        null,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-expense-pending",
+        "demo-budget-personnel",
+        "demo-project-structured",
+        "demo-user-worker-eng",
+        75,
+        "Gasto ficticio pendiente de revisión.",
+        null,
+        "PENDING",
+        null,
+        null,
+        null,
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "vacation_requests",
+    [
+      "id",
+      "user_id",
+      "department_id",
+      "request_title",
+      "days_json",
+      "request_type",
+      "hour_ranges_json",
+      "hours_total",
+      "uses_hour_bank",
+      "status",
+      "approver_id",
+      "approver_comment",
+      "proposed_days_json",
+      "proposed_hour_ranges_json",
+      "proposed_hours_total",
+      "change_request_comment",
+      "change_origin_status",
+      "created_by_admin",
+      "fixed_by_department",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-vacation-approved",
+        "demo-user-worker-ops-1",
+        "demo-dep-operaciones",
+        "Descanso anual de ejemplo",
+        json(["2026-07-13", "2026-07-14"]),
+        "FULL_DAY",
+        null,
+        0,
+        0,
+        "APPROVED",
+        "demo-user-coord-ops",
+        "Solicitud ficticia aprobada.",
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        0,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-vacation-hourly",
+        "demo-user-worker-ops-2",
+        "demo-dep-operaciones",
+        "Ausencia por horas de ejemplo",
+        json(["2026-05-20"]),
+        "HOURLY",
+        json([
+          {
+            day: "2026-05-20",
+            startTime: "10:00",
+            endTime: "12:00",
+            hours: 2,
+          },
+        ]),
+        2,
+        0,
+        "PENDING_ADMIN",
+        "demo-user-coord-ops",
+        "Validación ficticia de coordinación.",
+        null,
+        null,
+        null,
+        null,
+        null,
+        0,
+        0,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-vacation-change",
+        "demo-user-worker-eng",
+        "demo-dep-ingenieria",
+        "Cambio de fechas de ejemplo",
+        json(["2026-08-03"]),
+        "FULL_DAY",
+        null,
+        0,
+        0,
+        "CHANGE_PENDING_COORDINATOR",
+        null,
+        null,
+        json(["2026-08-10"]),
+        null,
+        0,
+        "Petición ficticia de cambio de fecha.",
+        "APPROVED",
+        0,
+        0,
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "vacation_events_history",
+    [
+      "id",
+      "request_id",
+      "from_status",
+      "to_status",
+      "changed_by",
+      "comment",
+      "created_at",
+    ],
+    [
+      [
+        "demo-vacation-history-approved",
+        "demo-vacation-approved",
+        "PENDING",
+        "APPROVED",
+        "demo-user-coord-ops",
+        "Aprobación ficticia para demostración.",
+        createdAt,
+      ],
+      [
+        "demo-vacation-history-change",
+        "demo-vacation-change",
+        "APPROVED",
+        "CHANGE_PENDING_COORDINATOR",
+        "demo-user-worker-eng",
+        "Solicitud ficticia de cambio.",
+        createdAt,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "vacation_blocks",
+    [
+      "id",
+      "department_id",
+      "days_json",
+      "start_date",
+      "end_date",
+      "reason",
+      "created_by",
+      "created_at",
+    ],
+    [
+      [
+        "demo-vacation-block",
+        "demo-dep-ingenieria",
+        json(["2026-09-21"]),
+        null,
+        null,
+        "Bloqueo ficticio de planificación.",
+        "demo-user-coord-eng",
+        createdAt,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "calendar_events",
+    [
+      "id",
+      "title",
+      "description",
+      "type",
+      "scope",
+      "department_id",
+      "days_json",
+      "start_date",
+      "end_date",
+      "all_day",
+      "blocks_selection",
+      "created_by",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-calendar-holiday",
+        "Día no laborable de ejemplo",
+        "Fecha completamente ficticia para demostraciones.",
+        "HOLIDAY",
+        "GLOBAL",
+        null,
+        json(["2026-06-19"]),
+        null,
+        null,
+        1,
+        1,
+        "demo-user-admin",
+        createdAt,
+        now,
+      ],
+      [
+        "demo-calendar-event",
+        "Jornada interna de ejemplo",
+        "Evento ficticio que no bloquea solicitudes.",
+        "EVENT",
+        "DEPARTMENT",
+        "demo-dep-operaciones",
+        json(["2026-06-22"]),
+        null,
+        null,
+        1,
+        0,
+        "demo-user-coord-ops",
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "workday_records",
+    [
+      "id",
+      "user_id",
+      "work_date",
+      "check_in_at",
+      "check_out_at",
+      "status",
+      "worked_minutes",
+      "overtime_minutes",
+      "incident_flags",
+      "check_in_latitude",
+      "check_in_longitude",
+      "check_out_latitude",
+      "check_out_longitude",
+      "check_in_device_type",
+      "check_out_device_type",
+      "check_in_ip_address",
+      "check_out_ip_address",
+      "check_in_user_agent",
+      "check_out_user_agent",
+      "check_in_device_reason",
+      "check_out_device_reason",
+      "requires_admin_validation",
+      "admin_validation_reason",
+      "admin_validation_status",
+      "admin_validated_by",
+      "admin_validated_at",
+      "admin_validation_comment",
+      "admin_close_comment",
+      "closed_by_admin_id",
+      "closed_by_admin_at",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-workday-completed",
+        "demo-user-worker-ops-1",
+        "2026-04-06",
+        "2026-04-06 08:02:00.000",
+        "2026-04-06 16:05:00.000",
+        "COMPLETED",
+        483,
+        3,
+        null,
+        0.0001,
+        0.0001,
+        0.0001,
+        0.0001,
+        "TABLET",
+        "TABLET",
+        "192.0.2.10",
+        "192.0.2.10",
+        "DemoBrowser/1.0",
+        "DemoBrowser/1.0",
+        null,
+        null,
+        0,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-workday-incident",
+        "demo-user-worker-ops-2",
+        "2026-04-07",
+        "2026-04-07 09:15:00.000",
+        "2026-04-07 15:45:00.000",
+        "INCIDENT",
+        390,
+        0,
+        json(["DEVICE_NOT_ALLOWED"]),
+        0.0002,
+        0.0002,
+        0.0002,
+        0.0002,
+        "DESKTOP",
+        "DESKTOP",
+        "198.51.100.20",
+        "198.51.100.20",
+        "DemoBrowser/1.0",
+        "DemoBrowser/1.0",
+        "Motivo ficticio de entrada.",
+        "Motivo ficticio de salida.",
+        1,
+        "DEVICE_NOT_ALLOWED",
+        "PENDING",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "workday_adjustment_requests",
+    [
+      "id",
+      "user_id",
+      "request_date",
+      "request_type",
+      "requested_time",
+      "requested_latitude",
+      "requested_longitude",
+      "reason",
+      "status",
+      "coordinator_comment",
+      "admin_comment",
+      "reviewed_by_coordinator_id",
+      "reviewed_by_admin_id",
+      "hidden_by_worker_at",
+      "reviewed_by",
+      "review_comment",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-adjustment-pending",
+        "demo-user-worker-ops-1",
+        "2026-04-08",
+        "CHECK_IN",
+        "2026-04-08 08:05:00.000",
+        0.0001,
+        0.0001,
+        "Olvido ficticio de fichaje.",
+        "PENDING_COORDINATOR",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-adjustment-approved",
+        "demo-user-worker-eng",
+        "2026-04-09",
+        "CHECK_OUT",
+        "2026-04-09 16:10:00.000",
+        0.0001,
+        0.0001,
+        "Corrección ficticia de salida.",
+        "APPROVED",
+        "Revisión ficticia favorable.",
+        "Aprobación ficticia final.",
+        "demo-user-coord-eng",
+        "demo-user-admin",
+        null,
+        "demo-user-admin",
+        "Aprobado en el escenario de demostración.",
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "workday_incident_justifications",
+    [
+      "id",
+      "record_id",
+      "user_id",
+      "reason",
+      "status",
+      "coordinator_comment",
+      "admin_comment",
+      "reviewed_by_coordinator_id",
+      "reviewed_by_admin_id",
+      "hidden_by_worker_at",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-incident-justification",
+        "demo-workday-incident",
+        "demo-user-worker-ops-2",
+        "Justificación ficticia de una incidencia.",
+        "PENDING_COORDINATOR",
+        null,
+        null,
+        null,
+        null,
+        null,
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "permission_requests",
+    [
+      "id",
+      "user_id",
+      "department_id",
+      "permission_date",
+      "permission_type",
+      "legal_permission_type",
+      "attachment_url",
+      "requested_units",
+      "requested_unit_type",
+      "reason",
+      "status",
+      "approver_id",
+      "approver_comment",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-permission-pending",
+        "demo-user-worker-ops-1",
+        "demo-dep-operaciones",
+        "2026-05-04",
+        "FULL_DAY",
+        "DEMO_LEGAL_PERMISSION",
+        "https://example.com/documentos/justificante-demo.pdf",
+        1,
+        "DAYS",
+        "Solicitud ficticia de permiso.",
+        "PENDING_COORDINATOR",
+        null,
+        null,
+        createdAt,
+        now,
+      ],
+      [
+        "demo-permission-approved",
+        "demo-user-worker-eng",
+        "demo-dep-ingenieria",
+        "2026-05-05",
+        "FULL_DAY",
+        "DEMO_LEGAL_PERMISSION",
+        null,
+        1,
+        "DAYS",
+        "Permiso aprobado de ejemplo.",
+        "APPROVED",
+        "demo-user-admin",
+        "Aprobación ficticia.",
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "remote_work_requests",
+    [
+      "id",
+      "user_id",
+      "department_id",
+      "remote_work_date",
+      "reason",
+      "status",
+      "approver_id",
+      "approver_comment",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-remote-work-approved",
+        "demo-user-worker-eng",
+        "demo-dep-ingenieria",
+        "2026-05-06",
+        "Teletrabajo ficticio para una demostración.",
+        "APPROVED",
+        "demo-user-coord-eng",
+        "Aprobación ficticia.",
+        createdAt,
+        now,
+      ],
+      [
+        "demo-remote-work-pending",
+        "demo-user-worker-ops-2",
+        "demo-dep-operaciones",
+        "2026-05-07",
+        "Solicitud de ejemplo pendiente.",
+        "PENDING",
+        null,
+        null,
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "time_control_trusted_networks",
+    [
+      "id",
+      "name",
+      "network_value",
+      "network_type",
+      "is_active",
+      "description",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-network-exact",
+        "Red exacta de ejemplo",
+        "192.0.2.10",
+        "EXACT_IP",
+        1,
+        "Dirección TEST-NET-1 reservada para documentación.",
+        createdAt,
+        now,
+      ],
+      [
+        "demo-network-cidr",
+        "Rango de ejemplo",
+        "198.51.100.0/24",
+        "CIDR",
+        1,
+        "Rango TEST-NET-2 reservado para documentación.",
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "time_control_allowed_locations",
+    [
+      "id",
+      "name",
+      "latitude",
+      "longitude",
+      "radius_meters",
+      "is_active",
+      "description",
+      "created_at",
+      "updated_at",
+    ],
+    [
+      [
+        "demo-location-origin",
+        "Ubicación ficticia de ejemplo",
+        0,
+        0,
+        100,
+        1,
+        "Coordenadas 0,0 usadas únicamente como dato demostrativo.",
+        createdAt,
+        now,
+      ],
+    ],
+  );
+
+  await upsertRows(
+    connection,
+    "notifications",
+    ["id", "to_user_id", "type", "payload_json", "read_at", "created_at"],
+    [
+      [
+        "demo-notification-vacation",
+        "demo-user-worker-ops-1",
+        "VACATION_REQUEST_APPROVED",
+        json({
+          requestId: "demo-vacation-approved",
+          message: "Notificación ficticia de solicitud aprobada.",
+        }),
+        null,
+        createdAt,
+      ],
+      [
+        "demo-notification-project",
+        "demo-user-worker-eng",
+        "PROJECT_ASSIGNED",
+        json({
+          projectId: "demo-project-structured",
+          message: "Notificación ficticia de asignación a proyecto.",
+        }),
+        "2026-03-03 10:00:00.000",
+        createdAt,
+      ],
+    ],
+  );
+
+  await connection.commit();
+  console.log(
+    `Seed completado: ${seededRows} filas ficticias insertadas o actualizadas.`,
+  );
+} catch (error) {
+  await connection.rollback();
+  throw error;
 } finally {
+  connection.release();
   await pool.end();
 }
