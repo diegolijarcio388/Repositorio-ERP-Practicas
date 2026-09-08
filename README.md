@@ -47,42 +47,60 @@ src/
     reporting/
   pages/
   layouts/
+```
 
 La aplicación utiliza contratos y adaptadores para desacoplar la lógica de negocio de las implementaciones concretas de persistencia y acceso a datos.
 
-🗄️ Base de datos
+## 🗄️ Base de datos
 
 El proyecto incluye persistencia en MySQL y migraciones SQL almacenadas en:
 
+```text
 db/migrations/
+```
 
 Para aplicar las migraciones:
 
+```bash
 npm run db:migrate
-🌱 Datos de demostración
+```
+
+## 🌱 Datos de demostración
 
 El repositorio incluye un seed con datos ficticios para poder probar la aplicación.
 
+```bash
 npm run db:seed
+```
 
 El seed incluye usuarios, departamentos, proyectos, tareas, asignaciones, imputaciones de horas, vacaciones y datos de control horario.
 
-⚙️ Instalación
+## ⚙️ Instalación
+
+```bash
 git clone https://github.com/diegolijarcio388/Repositorio-ERP-Practicas.git
 cd Repositorio-ERP-Practicas
 npm install
+```
 
-Crea un archivo .env a partir de .env.example.
+Crea un archivo `.env` a partir de `.env.example`.
 
+```env
 API_BASE_URL=http://localhost:3001
 MYSQL_URL=mysql://root:root@localhost:3306/cetemet_control
+```
 
 Después:
 
+```bash
 npm run db:migrate
 npm run db:seed
 npm run dev
-📜 Scripts
+```
+
+## 📜 Scripts
+
+```bash
 npm run dev
 npm run build
 npm run preview
@@ -90,13 +108,17 @@ npm run lint
 npm run format
 npm run db:migrate
 npm run db:seed
-🔐 Roles y acceso
+```
+
+## 🔐 Roles y acceso
 
 La aplicación dispone de distintos niveles de acceso para administración, coordinación y empleados.
 
 Las funcionalidades y rutas disponibles varían según el rol del usuario.
 
-📂 Principales rutas
+## 📂 Principales rutas
+
+```text
 /login
 /dashboard
 /proyectos
@@ -108,7 +130,9 @@ Las funcionalidades y rutas disponibles varían según el rol del usuario.
 /admin/configuracion
 /admin/vacaciones
 /admin/calendario
-ℹ️ Contexto del proyecto
+```
+
+## ℹ️ Contexto del proyecto
 
 Proyecto desarrollado durante mis prácticas de DAM sobre una aplicación ERP existente.
 
