@@ -26,3 +26,7 @@ pnpm-debug.log*
 # database
 cetemet_ERP.sql
 /public/uploads/permissions/
+
+# AI coding tools
+.claude/
+.codex-tmp/
