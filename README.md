@@ -1,129 +1,115 @@
-# cetemet-control-web
+# ERP interno — Astro
 
-Base ERP modular en Astro + React Islands.
+Aplicación web desarrollada sobre una base de código existente durante mis prácticas en CETEMET.
 
-## Stack
+El proyecto está orientado a la gestión interna de empleados, proyectos, control horario, vacaciones y administración.
 
-- Astro + TypeScript strict
-- React para islas interactivas
-- Tailwind CSS v4
-- Persistencia mock en localStorage (modulos legacy) + MySQL para Vacaciones/API
-- Output Astro en modo `server` con `@astrojs/node` para que los guards por cookie funcionen en runtime.
+La versión pública del repositorio ha sido adaptada para portfolio utilizando datos ficticios de demostración.
 
-## Comandos
+## 🚀 Funcionalidades principales
 
-- `npm install`
-- `npm run dev`
-- `npm run build`
-- `npm run preview`
-- `npm run lint`
-- `npm run format`
+- Gestión de usuarios y departamentos.
+- Gestión de proyectos, tareas y asignaciones.
+- Registro e imputación de horas.
+- Control horario y turnos de trabajo.
+- Gestión de vacaciones y solicitudes.
+- Paneles de administración.
+- Reporting.
+- Control de acceso según rol.
+- Persistencia de datos con MySQL.
+- Datos de demostración mediante seed.
 
-## Rutas
+## 🛠️ Stack
 
-- `/login`
-- `/dashboard`
-- `/proyectos`
-- `/horas`
-- `/reporting`
-- `/vacaciones`
-- `/vacaciones-departamento`
-- `/admin/usuarios`
-- `/admin/configuracion`
-- `/admin/vacaciones`
-- `/admin/calendario`
+- Astro
+- TypeScript
+- React
+- JavaScript
+- Tailwind CSS
+- MySQL
+- mysql2/promise
+- Node.js
+- npm
 
-## Arquitectura modular
+## 🧱 Arquitectura
+
+El proyecto sigue una estructura modular con separación entre lógica compartida, módulos funcionales, servicios y adaptadores.
 
 ```text
 src/
-  core/      -> contratos compartidos, guards, DI, storage, year-context
-  shared/    -> UI y utilidades realmente reutilizables
+  core/
+  shared/
   modules/
     auth/
     projects/
     time/
     admin/
     reporting/
-  pages/     -> composicion Astro (layout + islas)
+  pages/
   layouts/
-```
 
-### Reglas de dependencias
+La aplicación utiliza contratos y adaptadores para desacoplar la lógica de negocio de las implementaciones concretas de persistencia y acceso a datos.
 
-- Un modulo puede depender de `src/core` y `src/shared`.
-- Un modulo no puede importar desde otro modulo.
-- `src/shared` no depende de modulos.
-- Las paginas Astro no contienen logica de negocio; solo ensamblan layout + feature.
-- Contratos entre capa de aplicacion y adapters definidos en `src/core/ports`.
+🗄️ Base de datos
 
-## Ports & Adapters (actual)
+El proyecto incluye persistencia en MySQL y migraciones SQL almacenadas en:
 
-- `core/ports/AuthProvider`
-- `core/ports/ProjectsRepository`
-- `core/ports/TimeEntriesRepository`
+db/migrations/
 
-Implementaciones actuales:
+Para aplicar las migraciones:
 
-- `modules/auth/services/auth.service.ts`
-- `modules/projects/services/projects.repository.ts`
-- `modules/time/services/time.repository.ts`
+npm run db:migrate
+🌱 Datos de demostración
 
-Wiring centralizado en `src/core/di/container.ts`.
-Politica de imputacion de horas en `src/core/services/time-entry-policy.service.ts`:
-el usuario debe estar asignado al proyecto para poder registrar horas.
+El repositorio incluye un seed con datos ficticios para poder probar la aplicación.
 
-## Año transversal
+npm run db:seed
 
-- Contexto en `src/core/year/year-context.ts`:
-  - `getYear()`
-  - `setYear(year)`
-  - `subscribeYearChange(cb)`
-- Persistencia namespaced en localStorage.
-- Selector en topbar (2026, 2027, 2028).
-- Al cambiar de año se refrescan listados de proyectos y horas.
+El seed incluye usuarios, departamentos, proyectos, tareas, asignaciones, imputaciones de horas, vacaciones y datos de control horario.
 
-## Auth y guards
+⚙️ Instalación
+git clone https://github.com/diegolijarcio388/Repositorio-ERP-Practicas.git
+cd Repositorio-ERP-Practicas
+npm install
 
-- Login mock por email:
-  - `admin@example.com` -> `Admin`
-  - `responsable@example.com` -> `Responsable`
-  - resto -> `Empleado`
-- Guard auth: si no hay sesion, redirige a `/login`.
-- Guard admin: `/admin/*` solo para `Admin`.
-- En `horas`, filtro por usuario solo para `Admin` y `Responsable`.
+Crea un archivo .env a partir de .env.example.
 
-## Datos seed
-
-- Projects: 3 registros en 2026, 2 en 2027.
-- Time entries: 10 registros distribuidos en 2026/2027.
-
-## Como añadir un modulo nuevo sin tocar otros
-
-1. Crear `src/modules/<nuevo>/` con subcarpetas `domain`, `services`, `ui`, `pages`.
-2. Definir contratos nuevos en `src/core/ports` solo si necesitas integrar infraestructura.
-3. Implementar adapter del modulo en `services`.
-4. Exportar API publica minima en `src/modules/<nuevo>/index.ts`.
-5. Componer ruta Astro en `src/pages/...` usando layout + isla del modulo.
-6. Registrar dependencias en `src/core/di/container.ts` sin modificar otros modulos.
-
-## Migrar localStorage a API (sin romper modulos)
-
-1. Mantener interfaces en `src/core/ports` sin cambios.
-2. Crear nuevos adapters HTTP en `modules/<modulo>/services/*`.
-3. Cambiar solo el binding en `src/core/di/container.ts`.
-4. UI y paginas no se tocan, porque consumen el port, no la implementacion concreta.
-
-## Variables de entorno
-
-Archivo `.env.example`:
-
-```env
 API_BASE_URL=http://localhost:3001
 MYSQL_URL=mysql://root:root@localhost:3306/cetemet_control
-```
 
-## Base de datos MySQL (modulo Vacaciones)
+Después:
 
-- `npm run db:migrate`
-- `npm run db:seed`
+npm run db:migrate
+npm run db:seed
+npm run dev
+📜 Scripts
+npm run dev
+npm run build
+npm run preview
+npm run lint
+npm run format
+npm run db:migrate
+npm run db:seed
+🔐 Roles y acceso
+
+La aplicación dispone de distintos niveles de acceso para administración, coordinación y empleados.
+
+Las funcionalidades y rutas disponibles varían según el rol del usuario.
+
+📂 Principales rutas
+/login
+/dashboard
+/proyectos
+/horas
+/reporting
+/vacaciones
+/vacaciones-departamento
+/admin/usuarios
+/admin/configuracion
+/admin/vacaciones
+/admin/calendario
+ℹ️ Contexto del proyecto
+
+Proyecto desarrollado durante mis prácticas de DAM sobre una aplicación ERP existente.
+
+La versión publicada en GitHub está adaptada para portfolio y utiliza únicamente datos ficticios de demostración.
